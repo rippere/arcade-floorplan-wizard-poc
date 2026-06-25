@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Plan Your Space · Betson Game-Floor Planner</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='3' y='6' width='26' height='20' rx='2' fill='%230f1419'/%3E%3Crect x='8' y='11' width='16' height='10' rx='1' fill='%231f9d55'/%3E%3C/svg%3E" />
     <!--
       Interactive onboarding WIZARD for the Betson arcade floor-plan optimizer.
 
@@ -22,7 +23,7 @@
 
       WHY IT REUSES, NOT REBUILDS: the validation + usable math is the SAME engine the
       Python pipeline runs (src/arcade_optimizer/usables). Its browser port,
-      ../measure/validate.js, ALREADY models polygon_ft (outline), usable_polygon_ft
+      validate.js, ALREADY models polygon_ft (outline), usable_polygon_ft
       (the highlighted green box → usable_sqft), extraction_confidence, windows, doors,
       pillars — and already flags usable_exceeds_room / poly_rect_mismatch / degenerate
       polygons. This file is PURE UI over that contract; it changes no engine code, so
@@ -62,8 +63,8 @@
         -webkit-font-smoothing: antialiased;
         padding: 0 0 96px;
       }
-      .wrap { max-width: 620px; margin: 0 auto; padding: 16px; }
-      header.app { padding: 20px 16px 8px; max-width: 620px; margin: 0 auto; }
+      .wrap { max-width: 720px; margin: 0 auto; padding: 16px; }
+      header.app { padding: 20px 16px 8px; max-width: 720px; margin: 0 auto; }
       header.app h1 { font-size: 1.35rem; margin: 0 0 2px; letter-spacing: -0.01em; }
       header.app p { margin: 0; color: var(--muted); font-size: 0.92rem; }
 
@@ -447,7 +448,7 @@
             return stepHead("Your room's size", "Measure the <strong>inside</strong> — wall to wall, at floor level.") +
               '<div class="tworow">' + field("width", "Width (ft)", ui.width, "e.g. 40") +
               field("depth", "Depth (ft)", ui.depth, "e.g. 25") + "</div>" +
-              '<div class="flags" id="flagbox"></div>' + nav();
+              '<div class="flags" id="flagbox"></div>' + nav(!!(ui.width && ui.depth));
           },
           wire: function () { bindNum("width", "width"); bindNum("depth", "depth"); },
           flags: ["raw_dimensions_ft", "dimensions", "area", "width_ft", "depth_ft"],
@@ -574,7 +575,7 @@
         R.usable = {
           html: function () {
             var hasUsable = ui.usable_polygon_ft.length >= 3;
-            return stepHead("Highlight the usable area", "Draw the area you want games in — the <strong>green box</strong>. Leave it as the whole room, or carve out entries, counters, walkways.") +
+            return stepHead("Highlight the usable area", "Mark the area you want games in — the <strong>green box</strong>. Leave it as the whole room, or carve out entries, counters, walkways.") +
               '<label class="check"><input type="checkbox" id="wholeRoom" ' + (hasUsable ? "" : "checked") + ' />' +
               '<span class="ct">Use the whole room as usable<small>Uncheck to draw a smaller green area.</small></span></label>' +
               '<div id="usableEditor" class="' + (hasUsable ? "" : "hidden") + '">' +
@@ -648,7 +649,7 @@
         // —— pillars (all) ——————————————————————————————————————————————————————————————
         R.pillars = {
           html: function () {
-            return stepHead("Pillars & obstructions", "Anything standing in the room takes away usable floor: <strong>support pillars, columns, low beams, panels.</strong> Tap the floor to drop one.") +
+            return stepHead("Pillars & obstructions", "Anything standing on the floor means less real usable space — <strong>support pillars, columns, low beams, panels.</strong> We log them so your layout routes around them. Tap the floor to drop one.") +
               '<label class="check"><input type="checkbox" id="noObstr" ' + (ui.noObstr ? "checked" : "") + ' />' +
               '<span class="ct">My room is clear — no interior obstructions</span></label>' +
               '<div id="canvasArea" class="' + (ui.noObstr ? "hidden" : "") + '">' +
@@ -730,13 +731,24 @@
             return '<div class="routebox go">✓ <strong>Ready to plan.</strong> Everything checks out — this can go straight to a draft layout.</div>';
           return '<div class="routebox hold"><strong>A Betson specialist will review this with you.</strong> Nothing\'s wrong — your input just has open questions, so a human confirms before we plan.</div>';
         }
+        function polyCentroid(pts) {
+          // area-weighted centroid — lands inside L-shaped / concave room outlines, where
+          // the bounding-box center can fall on an edge or in the cut-out notch.
+          var x = 0, y = 0, a = 0;
+          for (var i = 0, n = pts.length; i < n; i++) {
+            var p = pts[i], q = pts[(i + 1) % n], cr = p[0] * q[1] - q[0] * p[1];
+            a += cr; x += (p[0] + q[0]) * cr; y += (p[1] + q[1]) * cr;
+          }
+          if (Math.abs(a) < 1e-6) { var b = polyBBox(pts); return [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2]; }
+          return [x / (3 * a), y / (3 * a)];
+        }
         function doorDiagram() {
-          return '<div class="diagram" aria-hidden="true"><svg viewBox="0 0 200 120">' +
+          return '<div class="diagram" aria-hidden="true"><svg viewBox="0 0 200 140">' +
             '<rect x="20" y="14" width="160" height="92" rx="3" fill="#f4f7fb" stroke="#c4d2e6" stroke-width="2" />' +
             '<rect x="60" y="22" width="80" height="84" fill="#fff" stroke="#1a2230" stroke-width="2.5" />' +
             '<path d="M60 64 a40 40 0 0 1 -16 -34" fill="none" stroke="#0b63c4" stroke-width="1.6" stroke-dasharray="3 3" />' +
-            '<line x1="60" y1="112" x2="140" y2="112" stroke="#1f9d55" stroke-width="2.5" />' +
-            '<text x="100" y="108" text-anchor="middle" font-size="11" font-weight="700" fill="#15623a">clear opening</text></svg></div>';
+            '<line x1="60" y1="116" x2="140" y2="116" stroke="#1f9d55" stroke-width="2.5" />' +
+            '<text x="100" y="132" text-anchor="middle" font-size="11" font-weight="700" fill="#15623a">clear opening</text></svg></div>';
         }
 
         // ── input binding helpers ────────────────────────────────────────────────────
@@ -760,9 +772,9 @@
             var parts = [v.bg];
             // faint room outline beneath the usable editor for context
             if (key === "usable_polygon_ft") {
-              if (ui.polygon_ft.length >= 3) parts.push('<path d="' + polyToPath(v, ui.polygon_ft) + '" fill="#f4f7fb" stroke="#c4d2e6" stroke-width="1.5" />');
+              if (ui.polygon_ft.length >= 3) parts.push('<path d="' + polyToPath(v, ui.polygon_ft) + '" fill="#f4f7fb" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="5 4" />');
               else if (ui.mode === "rectangle" && ui.width && ui.depth)
-                parts.push('<path d="' + polyToPath(v, [[0,0],[ui.width,0],[ui.width,ui.depth],[0,ui.depth]]) + '" fill="#f4f7fb" stroke="#c4d2e6" stroke-width="1.5" />');
+                parts.push('<path d="' + polyToPath(v, [[0,0],[ui.width,0],[ui.width,ui.depth],[0,ui.depth]]) + '" fill="#f4f7fb" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="5 4" />');
             }
             var pts = ui[key];
             parts.push('<path d="' + polyToPath(v, pts) + '" fill="' + (pts.length >= 3 ? fill : "none") + '" fill-opacity="0.6" stroke="' + stroke + '" stroke-width="2.5" stroke-linejoin="round" />');
@@ -771,7 +783,7 @@
               parts.push('<circle class="vtx" data-idx="' + i + '" cx="' + q[0].toFixed(1) + '" cy="' + q[1].toFixed(1) + '" r="7" fill="#fff" stroke="' + stroke + '" stroke-width="2.5" />');
             });
             if (pts.length >= 3) {
-              var b = polyBBox(pts), mid = v.toPx([(b[0]+b[2])/2, (b[1]+b[3])/2]);
+              var mid = v.toPx(polyCentroid(pts));
               parts.push('<text x="' + mid[0] + '" y="' + mid[1] + '" text-anchor="middle" font-size="13" font-weight="700" fill="' + stroke + '">' + Math.round(polyArea(pts)).toLocaleString() + ' sq ft</text>');
             }
             v.svg.innerHTML = parts.join("");
@@ -900,6 +912,7 @@
         // Gated steps don't rebuild their DOM on every edit, so the Next button's
         // disabled state must be re-synced live as the gate condition becomes true.
         function nextGate(id) {
+          if (id === "size") return !!(ui.width && ui.depth);
           if (id === "extent") return !!(ui.width && ui.depth);
           if (id === "upload") return !!ui.imageDataUrl;
           if (id === "scale") return !!ui.pxPerFt;
@@ -914,6 +927,10 @@
           var id = activeStepId();
           var box = document.getElementById("flagbox"); if (!box) return;
           var res = compute();
+          // Stay quiet on a pristine rectangle size form — no alarming red "missing
+          // width/depth" blockers before the customer has typed anything (Draw mode's
+          // equivalent step shows nothing on empty, so this also makes the two consistent).
+          if (id === "size" && !ui.width && !ui.depth) { box.innerHTML = ""; return; }
           var html = flagsForFields(res, R[id].flags || []);
           if (!html && id === "size" && res.usable_sqft !== null) {
             var gc = res.game_count, gw = gc === 1 ? " game" : " games";
