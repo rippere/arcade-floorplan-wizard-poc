@@ -718,9 +718,12 @@
               var a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "betson-room.json"; a.click();
             });
             document.getElementById("downloadPdfBtn").addEventListener("click", function () {
-              var blob = buildPdfBlob(compute());
-              var a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "betson-room-plan.pdf"; a.click();
-              setTimeout(function () { URL.revokeObjectURL(a.href); }, 4000);
+              var btn = this, label = btn.textContent; btn.disabled = true; btn.textContent = "Building PDF…";
+              buildPdfBlob(compute()).then(function (blob) {
+                var a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "betson-room-plan.pdf"; a.click();
+                setTimeout(function () { URL.revokeObjectURL(a.href); }, 4000);
+              }).catch(function (e) { alert("Could not build the PDF: " + ((e && e.message) || e)); })
+                .then(function () { btn.disabled = false; btn.textContent = label; });
             });
             document.getElementById("restartBtn").addEventListener("click", function () { ui = freshState(); cur = 0; rerender(); });
           },
@@ -908,7 +911,30 @@
         //  floor plan): zero dependencies, no build step, no network — the same
         //  browser-only / offline-first doctrine as the rest of this file.
         // ════════════════════════════════════════════════════════════════════════════
+        // re-encodes the uploaded plan to a JPEG (handles any input format) for PDF embedding
+        function imageToJpeg(dataUrl) {
+          return new Promise(function (resolve) {
+            var im = new Image();
+            im.onload = function () {
+              var maxDim = 1400, sc = Math.min(1, maxDim / Math.max(im.naturalWidth || 1, im.naturalHeight || 1));
+              var cw = Math.max(1, Math.round((im.naturalWidth || 1) * sc)), ch = Math.max(1, Math.round((im.naturalHeight || 1) * sc));
+              var c = document.createElement("canvas"); c.width = cw; c.height = ch;
+              var cx = c.getContext("2d"); cx.fillStyle = "#fff"; cx.fillRect(0, 0, cw, ch); cx.drawImage(im, 0, 0, cw, ch);
+              try {
+                var url = c.toDataURL("image/jpeg", 0.82), b64 = url.slice(url.indexOf(",") + 1), bin = atob(b64);
+                var bytes = new Uint8Array(bin.length);
+                for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+                resolve({ bytes: bytes, w: cw, h: ch });
+              } catch (e) { resolve(null); }
+            };
+            im.onerror = function () { resolve(null); };
+            im.src = dataUrl;
+          });
+        }
+        // returns Promise<Blob>: load the plan image first (media mode), then render the PDF
         function buildPdfBlob(res) {
+          var needImg = ui.mode === "media" && !!ui.imageDataUrl && !!ui.pxPerFt;
+          return (needImg ? imageToJpeg(ui.imageDataUrl) : Promise.resolve(null)).then(function (plan) {
           var W = 612, H = 792, margin = 54;          // US Letter, in points (1/72")
           var pages = [[]], pi = 0, y = H - margin;   // op-strings per page; y = flow cursor
           function add(s) { pages[pi].push(s); }
@@ -1011,9 +1037,9 @@
               "    |    page " + (p + 1) + " of " + pages.length + ") Tj ET");
           }
 
-          return assemble();
+          return assemble(plan);
 
-          // draws the room/usable/pillars into a fixed-height box at the flow cursor
+          // draws the plan image + room/usable/pillars into a fixed-height box at the cursor
           function drawFloorPlan() {
             var boxH = 250, boxW = W - 2 * margin;
             need(boxH + 22);
@@ -1023,17 +1049,29 @@
 
             var room = ui.polygon_ft.length >= 3 ? ui.polygon_ft
               : (ui.width && ui.depth ? [[0, 0], [ui.width, 0], [ui.width, ui.depth], [0, ui.depth]] : null);
-            if (!room) {
+            if (!room && !plan) {
               add("BT /F1 10 Tf " + rgb("#94a3b8") + " rg " + (left + 12) + " " + (top - 20).toFixed(1) + " Td (No geometry captured yet.) Tj ET");
               y = bottom - 8; return;
             }
             var usable = ui.usable_polygon_ft.length >= 3 ? ui.usable_polygon_ft : room;
             var pillars = ui.noObstr ? [] : ui.pillars;
+            var pad = 16, bb, s;
 
-            var pad = 16, bb = polyBBox(room);
-            var ew = Math.max(bb[2] - bb[0], 1), ed = Math.max(bb[3] - bb[1], 1);
-            var s = Math.min((boxW - 2 * pad) / ew, (boxH - 2 * pad) / ed);
-            var dw = ew * s, dh = ed * s;
+            // With an uploaded plan, fit the IMAGE's foot-extent to the box so the whole photo
+            // shows with the overlay positioned on it (same as the on-screen review); the room
+            // was traced in these feet (1 ft = pxPerFt viewBox units, see makeStage). Otherwise
+            // fit the room's bounding box.
+            if (plan) {
+              var iw = (ui.imgNatural && ui.imgNatural.w) || plan.w, ih = (ui.imgNatural && ui.imgNatural.h) || plan.h;
+              var vsc = Math.min(540 / iw, 360 / ih);
+              var imgWft = (iw * vsc) / ui.pxPerFt, imgHft = (ih * vsc) / ui.pxPerFt;
+              bb = [0, 0, imgWft, imgHft];
+              s = Math.min((boxW - 2 * pad) / imgWft, (boxH - 2 * pad) / imgHft);
+            } else {
+              bb = polyBBox(room);
+              s = Math.min((boxW - 2 * pad) / Math.max(bb[2] - bb[0], 1), (boxH - 2 * pad) / Math.max(bb[3] - bb[1], 1));
+            }
+            var dw = (bb[2] - bb[0]) * s, dh = (bb[3] - bb[1]) * s;
             var ox = left + (boxW - dw) / 2, oyTop = top - (boxH - dh) / 2;   // PDF y grows up → flip
             function mp(ft) { return [ox + (ft[0] - bb[0]) * s, oyTop - (ft[1] - bb[1]) * s]; }
             function path(pts) {
@@ -1041,8 +1079,11 @@
               pts.forEach(function (pt, i) { var q = mp(pt); d += q[0].toFixed(2) + " " + q[1].toFixed(2) + (i === 0 ? " m " : " l "); });
               return d + "h";
             }
-            add(rgb("#e7f6ee") + " rg " + rgb("#1f9d55") + " RG 1.5 w " + path(usable) + " B");  // usable fill+stroke
-            add(rgb("#0b63c4") + " RG 2 w " + path(room) + " S");                                  // room outline
+            // uploaded plan as the backdrop: image XObject /Im0, lower-left at (ox, oyTop - dh)
+            if (plan) add("q " + dw.toFixed(2) + " 0 0 " + dh.toFixed(2) + " " + ox.toFixed(2) + " " + (oyTop - dh).toFixed(2) + " cm /Im0 Do Q");
+            // over a photo the usable is stroked only (a fill would hide the plan); else fill+stroke
+            if (usable) add(rgb("#e7f6ee") + " rg " + rgb("#1f9d55") + " RG 2.5 w " + path(usable) + (plan ? " S" : " B"));
+            if (room) add(rgb("#0b63c4") + " RG 2 w " + path(room) + " S");
             pillars.forEach(function (pl) {
               var q = mp([pl.x_ft, pl.y_ft]), L = Math.max((pl.w_ft || 2) * s, 5);
               add(rgb("#1a2230") + " rg " + (q[0] - L / 2).toFixed(1) + " " + (q[1] - L / 2).toFixed(1) + " " + L.toFixed(1) + " " + L.toFixed(1) + " re f");
@@ -1050,31 +1091,47 @@
             y = bottom - 8;
           }
 
-          // serializes objects → a valid PDF byte string → Blob (all ASCII, so 1 char = 1 byte)
-          function assemble() {
-            var objs = [];
-            objs[1] = "<< /Type /Catalog /Pages 2 0 R >>";
-            objs[3] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>";
-            objs[4] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>";
-            var kids = [], n = 5;
-            for (var p = 0; p < pages.length; p++) {
-              var stream = pages[p].join("\n");
-              var contentNum = n++, pageNum = n++;
-              objs[contentNum] = "<< /Length " + stream.length + " >>\nstream\n" + stream + "\nendstream";
-              objs[pageNum] = "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 " + W + " " + H + "]" +
-                " /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents " + contentNum + " 0 R >>";
-              kids.push(pageNum + " 0 R");
-            }
-            objs[2] = "<< /Type /Pages /Kids [" + kids.join(" ") + "] /Count " + pages.length + " >>";
+          // serializes objects → PDF bytes (binary-safe so the embedded JPEG survives) → Blob
+          function assemble(plan) {
+            var enc = new TextEncoder();
+            var chunks = [], len = 0, offsets = [];
+            function raw(u8) { chunks.push(u8); len += u8.length; }
+            function put(s) { raw(enc.encode(s)); }
+            // object numbering: 1 Catalog, 2 Pages, 3 F1, 4 F2, [5 Image], then content/page pairs
+            var next = plan ? 6 : 5, contentNums = [], pageNums = [];
+            for (var p = 0; p < pages.length; p++) { contentNums.push(next++); pageNums.push(next++); }
+            var maxObj = next - 1;
+            function objStart(num) { offsets[num] = len; put(num + " 0 obj\n"); }
+            function objEnd() { put("\nendobj\n"); }
 
-            var out = "%PDF-1.4\n", offsets = [], maxObj = n - 1;
-            for (var i = 1; i <= maxObj; i++) { offsets[i] = out.length; out += i + " 0 obj\n" + objs[i] + "\nendobj\n"; }
-            var xrefPos = out.length;
-            out += "xref\n0 " + (maxObj + 1) + "\n0000000000 65535 f \n";
-            for (var j = 1; j <= maxObj; j++) { var off = String(offsets[j]); while (off.length < 10) off = "0" + off; out += off + " 00000 n \n"; }
-            out += "trailer\n<< /Size " + (maxObj + 1) + " /Root 1 0 R >>\nstartxref\n" + xrefPos + "\n%%EOF";
+            put("%PDF-1.4\n");
+            objStart(1); put("<< /Type /Catalog /Pages 2 0 R >>"); objEnd();
+            objStart(2); put("<< /Type /Pages /Kids [" + pageNums.map(function (k) { return k + " 0 R"; }).join(" ") + "] /Count " + pages.length + " >>"); objEnd();
+            objStart(3); put("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"); objEnd();
+            objStart(4); put("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>"); objEnd();
+            if (plan) {
+              objStart(5);
+              put("<< /Type /XObject /Subtype /Image /Width " + plan.w + " /Height " + plan.h +
+                  " /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length " + plan.bytes.length + " >>\nstream\n");
+              raw(plan.bytes); put("\nendstream"); objEnd();
+            }
+            var xobj = plan ? " /XObject << /Im0 5 0 R >>" : "";
+            for (var q = 0; q < pages.length; q++) {
+              var sbytes = enc.encode(pages[q].join("\n"));
+              objStart(contentNums[q]); put("<< /Length " + sbytes.length + " >>\nstream\n"); raw(sbytes); put("\nendstream"); objEnd();
+              objStart(pageNums[q]); put("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 " + W + " " + H + "]" +
+                " /Resources << /Font << /F1 3 0 R /F2 4 0 R >>" + xobj + " >> /Contents " + contentNums[q] + " 0 R >>"); objEnd();
+            }
+            var xrefPos = len;
+            put("xref\n0 " + (maxObj + 1) + "\n0000000000 65535 f \n");
+            for (var i = 1; i <= maxObj; i++) { var off = String(offsets[i]); while (off.length < 10) off = "0" + off; put(off + " 00000 n \n"); }
+            put("trailer\n<< /Size " + (maxObj + 1) + " /Root 1 0 R >>\nstartxref\n" + xrefPos + "\n%%EOF");
+
+            var out = new Uint8Array(len), at = 0;
+            for (var k = 0; k < chunks.length; k++) { out.set(chunks[k], at); at += chunks[k].length; }
             return new Blob([out], { type: "application/pdf" });
           }
+          });
         }
 
         function recomputeScale() {
