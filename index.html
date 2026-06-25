@@ -1,0 +1,927 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Plan Your Space · Betson Game-Floor Planner</title>
+    <!--
+      Interactive onboarding WIZARD for the Betson arcade floor-plan optimizer.
+
+      WHAT THIS IS: the richer sibling of web/measure/. Where measure/ captures a
+      rectangle + two numbers, this wizard is a BRANCHING flow with three peer entry
+      points that route to different subsets of steps:
+
+        Rectangle   → width × depth (the measure/ fast lane)
+        Irregular   → draw the room OUTLINE polygon on a sized canvas
+        Upload media→ trace the outline over an uploaded plan/photo (with scale calibration)
+
+      …all converging on the same powerful shared tail: HIGHLIGHT THE USABLE AREA — the
+      customer paints the green region the engine should count — then door / ceiling /
+      obstructions / review. The more the input already carries, the more steps collapse
+      from "enter" to "confirm" (a clean CAD upload needs less than a napkin sketch).
+
+      WHY IT REUSES, NOT REBUILDS: the validation + usable math is the SAME engine the
+      Python pipeline runs (src/arcade_optimizer/usables). Its browser port,
+      ../measure/validate.js, ALREADY models polygon_ft (outline), usable_polygon_ft
+      (the highlighted green box → usable_sqft), extraction_confidence, windows, doors,
+      pillars — and already flags usable_exceeds_room / poly_rect_mismatch / degenerate
+      polygons. This file is PURE UI over that contract; it changes no engine code, so
+      tests/test_measure_js_parity.py stays green by construction.
+
+      Browser-only + static + offline-first by design: no backend, no build step, no
+      network, no third-party libs. The SVG geometry editors follow the exact
+      createSVGPoint/getScreenCTM pattern proven in ../measure/index.html. (DWG/PDF
+      auto-extraction is the future loopback-FastAPI enhancement; image upload + manual
+      trace is the offline-safe path that needs nothing.)
+    -->
+    <style>
+      :root {
+        --bg: #0f1419;
+        --panel: #ffffff;
+        --ink: #1a2230;
+        --muted: #5b6b80;
+        --line: #e3e8ef;
+        --brand: #0b63c4;
+        --brand-ink: #084a94;
+        --green: #1f9d55;
+        --green-soft: #e7f6ee;
+        --green-line: #1f9d55;
+        --amber: #b7791f;
+        --amber-soft: #fdf3e2;
+        --red: #c0392b;
+        --red-soft: #fdecea;
+        --shadow: 0 6px 24px rgba(16, 32, 56, 0.12);
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; padding: 0; }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        background: linear-gradient(180deg, #f4f7fb 0%, #eef2f8 100%);
+        color: var(--ink);
+        line-height: 1.5;
+        -webkit-font-smoothing: antialiased;
+        padding: 0 0 96px;
+      }
+      .wrap { max-width: 620px; margin: 0 auto; padding: 16px; }
+      header.app { padding: 20px 16px 8px; max-width: 620px; margin: 0 auto; }
+      header.app h1 { font-size: 1.35rem; margin: 0 0 2px; letter-spacing: -0.01em; }
+      header.app p { margin: 0; color: var(--muted); font-size: 0.92rem; }
+
+      /* live mirror */
+      .mirror {
+        position: sticky; top: 8px; z-index: 5;
+        background: var(--ink); color: #fff; border-radius: 16px;
+        padding: 14px 16px; box-shadow: var(--shadow);
+        display: flex; align-items: center; gap: 14px; margin-bottom: 16px;
+      }
+      .mirror .count { font-size: 2rem; font-weight: 700; line-height: 1; }
+      .mirror .count small { font-size: 0.8rem; font-weight: 500; opacity: 0.8; display: block; margin-top: 3px; }
+      .mirror .sqft { color: #c7d2e0; font-size: 0.9rem; }
+      .mirror .spacer { flex: 1; }
+      .pill {
+        font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+        padding: 5px 10px; border-radius: 999px; white-space: nowrap;
+      }
+      .pill.high { background: var(--green); color: #fff; }
+      .pill.medium { background: var(--amber); color: #fff; }
+      .pill.low { background: var(--red); color: #fff; }
+
+      /* progress */
+      .steps { display: flex; gap: 6px; margin-bottom: 14px; }
+      .steps .dot { flex: 1; height: 5px; border-radius: 999px; background: var(--line); }
+      .steps .dot.done { background: var(--brand); }
+      .steps .dot.active { background: var(--brand); opacity: 0.55; }
+
+      .card {
+        background: var(--panel); border: 1px solid var(--line); border-radius: 16px;
+        padding: 20px; box-shadow: var(--shadow);
+      }
+      .stepno { color: var(--brand); font-weight: 700; font-size: 0.78rem; letter-spacing: 0.06em; text-transform: uppercase; }
+      .card h2 { font-size: 1.18rem; margin: 4px 0 4px; letter-spacing: -0.01em; }
+      .card .lead { color: var(--muted); margin: 0 0 16px; font-size: 0.95rem; }
+
+      label.field { display: block; margin: 14px 0; }
+      label.field .lab { font-weight: 600; font-size: 0.92rem; display: block; margin-bottom: 6px; }
+      .inputrow { display: flex; align-items: stretch; border: 1.5px solid var(--line); border-radius: 12px; overflow: hidden; background: #fff; transition: border-color 0.15s; }
+      .inputrow:focus-within { border-color: var(--brand); }
+      .inputrow input { flex: 1; border: 0; outline: 0; padding: 13px 14px; font-size: 1.05rem; min-width: 0; background: transparent; color: var(--ink); }
+      .inputrow .unit { display: flex; align-items: center; padding: 0 14px; background: #f4f7fb; color: var(--muted); font-weight: 600; font-size: 0.9rem; border-left: 1px solid var(--line); }
+      .hinttext { color: var(--muted); font-size: 0.84rem; margin: 6px 2px 0; }
+      .tworow { display: flex; gap: 10px; }
+      .tworow label.field { flex: 1; }
+
+      /* mode + generic choices */
+      .modes { display: grid; grid-template-columns: 1fr; gap: 10px; margin: 6px 0 4px; }
+      @media (min-width: 520px) { .modes { grid-template-columns: 1fr 1fr 1fr; } }
+      .choices { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 6px 0 4px; }
+      .choice { border: 1.5px solid var(--line); border-radius: 12px; padding: 12px; cursor: pointer; text-align: left; background: #fff; font: inherit; color: var(--ink); transition: all 0.12s; }
+      .choice:hover { border-color: #c4d2e6; }
+      .choice.sel { border-color: var(--brand); background: #f0f6ff; box-shadow: inset 0 0 0 1px var(--brand); }
+      .choice .ic2 { font-size: 1.3rem; }
+      .choice .t { font-weight: 700; font-size: 0.95rem; }
+      .choice .d { color: var(--muted); font-size: 0.82rem; margin-top: 2px; }
+
+      .check { display: flex; gap: 10px; align-items: flex-start; margin: 14px 0; cursor: pointer; }
+      .check input { width: 20px; height: 20px; margin-top: 2px; flex: none; accent-color: var(--brand); }
+      .check .ct { font-size: 0.92rem; }
+      .check .ct small { display: block; color: var(--muted); font-size: 0.82rem; }
+
+      /* flags */
+      .flags { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+      .flag { border-radius: 10px; padding: 10px 12px; font-size: 0.88rem; display: flex; gap: 9px; align-items: flex-start; }
+      .flag.warning { background: var(--amber-soft); color: #7a5212; }
+      .flag.blocking { background: var(--red-soft); color: #8a261b; }
+      .flag .ic { font-weight: 800; flex: none; }
+      .flag .fx strong { display: block; }
+      .flag .fx .hint { opacity: 0.85; margin-top: 2px; }
+      .ok-note { margin-top: 14px; background: var(--green-soft); color: #15623a; border-radius: 10px; padding: 10px 12px; font-size: 0.88rem; }
+
+      /* door diagram */
+      .diagram { display: flex; justify-content: center; margin: 4px 0 8px; }
+      .diagram svg { max-width: 230px; width: 100%; height: auto; }
+
+      /* geometry stage (outline draw / usable highlight / pillar place) */
+      .stagewrap { position: relative; margin: 8px 0; }
+      svg.stage { width: 100%; touch-action: none; background: #fbfdff; border: 1px solid var(--line); border-radius: 12px; display: block; }
+      .stage .vtx { cursor: grab; }
+      .stage .vtx:active { cursor: grabbing; }
+      .toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 4px; }
+      .tool { font: inherit; font-size: 0.84rem; font-weight: 600; border: 1.5px solid var(--line); background: #fff; color: var(--ink); border-radius: 10px; padding: 8px 12px; cursor: pointer; }
+      .tool:hover { border-color: #c4d2e6; }
+      .tool.warn { color: var(--red); }
+      .tool:disabled { opacity: 0.45; cursor: not-allowed; }
+      .uploadbox { border: 2px dashed var(--line); border-radius: 12px; padding: 22px; text-align: center; color: var(--muted); cursor: pointer; transition: border-color 0.15s; }
+      .uploadbox:hover { border-color: var(--brand); }
+      .uploadbox input { display: none; }
+      .calibnote { font-size: 0.86rem; color: var(--muted); margin: 6px 2px; }
+      .pillarlist { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+      .pillarchip { background: #eef2f8; border-radius: 999px; padding: 4px 10px; font-size: 0.82rem; display: flex; gap: 6px; align-items: center; }
+      .pillarchip button { border: 0; background: none; color: var(--red); font-weight: 800; cursor: pointer; font-size: 1rem; line-height: 1; padding: 0; }
+
+      /* nav */
+      .nav { display: flex; gap: 10px; margin-top: 20px; }
+      button.btn { font: inherit; font-weight: 700; border-radius: 12px; padding: 13px 18px; cursor: pointer; border: 1.5px solid transparent; transition: all 0.12s; }
+      button.btn.primary { background: var(--brand); color: #fff; flex: 1; }
+      button.btn.primary:hover { background: var(--brand-ink); }
+      button.btn.ghost { background: #fff; color: var(--ink); border-color: var(--line); }
+      button.btn.ghost:hover { border-color: #c4d2e6; }
+      button.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+      /* review */
+      .review-line { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--line); }
+      .review-line .k { color: var(--muted); }
+      .review-line .v { font-weight: 700; text-align: right; }
+      .reasons, .caveats { margin: 10px 0 0; padding-left: 18px; }
+      .reasons li, .caveats li { font-size: 0.86rem; color: var(--muted); margin: 4px 0; }
+      .routebox { border-radius: 12px; padding: 14px; margin: 14px 0; font-size: 0.92rem; }
+      .routebox.go { background: var(--green-soft); color: #15623a; }
+      .routebox.hold { background: var(--amber-soft); color: #7a5212; }
+      details.json { margin-top: 14px; }
+      details.json summary { cursor: pointer; font-weight: 600; color: var(--brand); }
+      details.json pre { background: #0f1726; color: #d7e2f2; padding: 12px; border-radius: 10px; overflow: auto; font-size: 0.78rem; line-height: 1.45; }
+      .sectit { font-weight: 700; margin: 16px 0 4px; font-size: 0.95rem; }
+      .hidden { display: none !important; }
+    </style>
+  </head>
+  <body>
+    <header class="app">
+      <h1>Plan your space</h1>
+      <p>Draw it, sketch it, or upload a plan — we'll find the usable floor and how many games fit.</p>
+    </header>
+
+    <div class="wrap">
+      <!-- live mirror -->
+      <div class="mirror" id="mirror">
+        <div>
+          <div class="count" id="mCount">—<small id="mCountSub">games (rough)</small></div>
+        </div>
+        <div class="spacer"></div>
+        <div style="text-align:right">
+          <div class="sqft" id="mSqft">choose how to start</div>
+          <div style="margin-top:6px"><span class="pill low" id="mPill">incomplete</span></div>
+        </div>
+      </div>
+
+      <div class="steps" id="dots"></div>
+
+      <!-- the active step renders here -->
+      <section class="card" id="stepCard"></section>
+    </div>
+
+    <script src="validate.js"></script>
+    <script>
+      (function () {
+        "use strict";
+        var M = window.BetsonMeasure;
+
+        // ── capture state — a superset of the RoomInput we are building ──────────────
+        function freshState() {
+          return {
+            mode: null,            // 'rectangle' | 'irregular' | 'media'
+            // rectangle / irregular extent
+            width: null,
+            depth: null,
+            // geometry (feet, room origin at top-left)
+            polygon_ft: [],        // room outline (irregular + media)
+            usable_polygon_ft: [], // highlighted usable region (all modes, optional)
+            // media
+            imageDataUrl: null,
+            imgNatural: null,      // {w,h} px of the uploaded image
+            pxPerFt: null,         // from scale calibration (viewBox units per foot)
+            calib: null,           // {a:[px,px], b:[px,px], lengthFt} in viewBox space
+            // shared facts
+            door: null, doorInside: false, doorUnknown: false,
+            ceiling: null, ropes: false,
+            noObstr: false, pillars: [],
+          };
+        }
+        var ui = freshState();
+
+        // dynamic step list, computed per mode. Each entry is a step id.
+        function stepList() {
+          if (ui.mode === "rectangle")
+            return ["size", "usable", "door", "ceiling", "pillars", "review"];
+          if (ui.mode === "irregular")
+            return ["extent", "outline", "usable", "door", "ceiling", "pillars", "review"];
+          if (ui.mode === "media")
+            return ["upload", "scale", "outline", "usable", "door", "ceiling", "pillars", "review"];
+          return ["start"]; // mode not chosen yet
+        }
+        var cur = 0; // index into stepList()
+
+        function parseNum(v) {
+          if (v === null || v === undefined) return null;
+          var s = String(v).trim();
+          if (s === "") return null;
+          var n = Number(s);
+          return Number.isFinite(n) ? n : null;
+        }
+        function escapeHtml(s) {
+          return String(s).replace(/[&<>"]/g, function (c) {
+            return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+          });
+        }
+
+        // ── build the neutral RoomInput dict the engine ingests ──────────────────────
+        function buildRoom() {
+          var doors = [];
+          if (!ui.doorUnknown && ui.door !== null) {
+            doors = [{ width_in: ui.door, measured_inside: ui.doorInside, location: null }];
+          } else if (ui.doorUnknown) {
+            doors = [{ width_in: null }]; // → assumed 36", flagged
+          }
+          var poly = ui.polygon_ft.length >= 3 ? ui.polygon_ft.map(function (p) { return [p[0], p[1]]; }) : null;
+          var usable = ui.usable_polygon_ft.length >= 3 ? ui.usable_polygon_ft.map(function (p) { return [p[0], p[1]]; }) : null;
+
+          var room = {
+            source_format: ui.mode === "media" ? "image" : "manual",
+            shape: ui.mode === "rectangle" ? "rectangular" : "irregular",
+            ceiling_height_ft: ui.ceiling,
+            doors: doors,
+            pillars: ui.noObstr ? [] : ui.pillars.slice(),
+            has_ropes_course: ui.ropes,
+            notes: [],
+          };
+          // Rectangle: width×depth is the source of truth (no polygon → engine uses w*d).
+          if (ui.mode === "rectangle") {
+            room.width_ft = ui.width;
+            room.depth_ft = ui.depth;
+            room.raw_dimensions_ft = [ui.width, ui.depth].filter(function (d) { return d && d > 0; });
+          } else {
+            // Irregular / media: the polygon is the room. Omit width/depth so we don't
+            // trip poly_rect_mismatch against a rough bounding box.
+            room.raw_dimensions_ft = [];
+            if (poly) {
+              room.polygon_ft = poly;
+            } else if (ui.width && ui.depth) {
+              // outline not drawn yet → fall back to rough extent so a count still shows
+              room.width_ft = ui.width;
+              room.depth_ft = ui.depth;
+              room.raw_dimensions_ft = [ui.width, ui.depth].filter(function (d) { return d && d > 0; });
+            }
+            room.notes.push("Outline captured interactively — Betson confirms the true outline.");
+          }
+          if (usable) room.usable_polygon_ft = usable;
+          return room;
+        }
+
+        // ── geometry helpers ─────────────────────────────────────────────────────────
+        function polyArea(pts) {
+          var acc = 0, n = pts.length;
+          for (var i = 0; i < n; i++) {
+            var a = pts[i], b = pts[(i + 1) % n];
+            acc += a[0] * b[1] - b[0] * a[1];
+          }
+          return Math.abs(acc) / 2;
+        }
+        function polyBBox(pts) {
+          var xs = pts.map(function (p) { return p[0]; });
+          var ys = pts.map(function (p) { return p[1]; });
+          return [Math.min.apply(null, xs), Math.min.apply(null, ys), Math.max.apply(null, xs), Math.max.apply(null, ys)];
+        }
+        // feet extent of the current room, for sizing the canvas
+        function roomExtentFt() {
+          if (ui.polygon_ft.length >= 3) {
+            var b = polyBBox(ui.polygon_ft);
+            return { w: Math.max(b[2], 1), d: Math.max(b[3], 1) };
+          }
+          if (ui.width && ui.depth) return { w: ui.width, d: ui.depth };
+          return { w: 40, d: 25 }; // neutral default canvas
+        }
+
+        // ── the live mirror + the engine result ──────────────────────────────────────
+        function compute() { return M.buildUsable(buildRoom()); }
+        function renderMirror(res) {
+          var mCount = document.getElementById("mCount");
+          var mSub = document.getElementById("mCountSub");
+          var mSqft = document.getElementById("mSqft");
+          var mPill = document.getElementById("mPill");
+          if (res.game_count !== null) {
+            mCount.firstChild.nodeValue = "≈ " + res.game_count + " ";
+            mSub.textContent = "games (rough)";
+            mSqft.textContent = Math.round(res.usable_sqft).toLocaleString() + " sq ft usable";
+          } else {
+            mCount.firstChild.nodeValue = "— ";
+            mSub.textContent = "games";
+            mSqft.textContent = ui.mode ? "keep going" : "choose how to start";
+          }
+          mPill.className = "pill " + res.confidence;
+          mPill.textContent = res.confidence;
+        }
+        function flagHtml(i) {
+          var ic = i.severity === "blocking" ? "⛔" : "⚠";
+          var hint = i.hint ? '<div class="hint">' + escapeHtml(i.hint) + "</div>" : "";
+          return '<div class="flag ' + i.severity + '"><span class="ic">' + ic + "</span>" +
+            '<span class="fx"><strong>' + escapeHtml(i.message) + "</strong>" + hint + "</span></div>";
+        }
+        function flagsForFields(res, fields) {
+          return res.inconsistencies
+            .filter(function (i) { return fields.indexOf(i.field) !== -1; })
+            .map(flagHtml).join("");
+        }
+
+        // ════════════════════════════════════════════════════════════════════════════
+        //  SVG GEOMETRY STAGE  — shared by outline-draw, usable-highlight, pillar-place
+        //  Mirrors the createSVGPoint/getScreenCTM mapping proven in ../measure.
+        // ════════════════════════════════════════════════════════════════════════════
+        var PAD = 26;
+        // returns a view {svg, toPx, toFt, ...} sized to the room extent (or image)
+        function makeStage(svg, opts) {
+          opts = opts || {};
+          var maxW = 540, maxH = 360;
+          var scale, vw, vh, ox = PAD, oy = PAD, bg = "";
+          if (opts.image && ui.imageDataUrl) {
+            var iw = ui.imgNatural ? ui.imgNatural.w : maxW, ih = ui.imgNatural ? ui.imgNatural.h : maxH;
+            var s = Math.min(maxW / iw, maxH / ih);
+            vw = iw * s; vh = ih * s; ox = 0; oy = 0;
+            scale = ui.pxPerFt ? ui.pxPerFt : null; // viewBox-units per foot
+            bg = '<image href="' + ui.imageDataUrl + '" x="0" y="0" width="' + vw + '" height="' + vh + '" preserveAspectRatio="none" />';
+          } else {
+            var ext = roomExtentFt();
+            scale = Math.min((maxW - 2 * PAD) / ext.w, (maxH - 2 * PAD) / ext.d);
+            vw = ext.w * scale + 2 * PAD; vh = ext.d * scale + 2 * PAD;
+          }
+          svg.setAttribute("viewBox", "0 0 " + vw + " " + vh);
+          var view = {
+            svg: svg, ox: ox, oy: oy, scale: scale, vw: vw, vh: vh, bg: bg, image: !!opts.image,
+            toPx: function (ft) { return [ox + ft[0] * scale, oy + ft[1] * scale]; },
+            toFt: function (clientX, clientY) {
+              var loc = clientToViewBox(svg, clientX, clientY); if (!loc) return null;
+              if (scale) return [(loc[0] - ox) / scale, (loc[1] - oy) / scale];
+              return loc; // uncalibrated viewBox space (scale step only)
+            },
+            toViewBox: function (clientX, clientY) { return clientToViewBox(svg, clientX, clientY); },
+          };
+          return view;
+        }
+        function clientToViewBox(svg, clientX, clientY) {
+          var pt = svg.createSVGPoint(); pt.x = clientX; pt.y = clientY;
+          var ctm = svg.getScreenCTM(); if (!ctm) return null;
+          var loc = pt.matrixTransform(ctm.inverse());
+          return [loc.x, loc.y];
+        }
+
+        function polyToPath(view, pts) {
+          if (!pts.length) return "";
+          return pts.map(function (p, i) {
+            var q = view.toPx(p);
+            return (i === 0 ? "M" : "L") + q[0].toFixed(1) + " " + q[1].toFixed(1);
+          }).join(" ") + (pts.length >= 3 ? " Z" : "");
+        }
+
+        // ════════════════════════════════════════════════════════════════════════════
+        //  STEP RENDERERS  — one per step id; each has html(res), wire(res), flags[]
+        // ════════════════════════════════════════════════════════════════════════════
+        var R = {};
+
+        // —— start: choose entry mode ————————————————————————————————————————————————
+        R.start = {
+          html: function () {
+            return '<div class="stepno">Step 1</div><h2>How do you want to start?</h2>' +
+              '<p class="lead">Pick whichever fits what you have. The more detail you give, the higher your confidence — but any path works.</p>' +
+              '<div class="modes">' +
+              modeBtn("rectangle", "▭", "Rectangle", "Four straight walls — two numbers") +
+              modeBtn("irregular", "✎", "Draw the shape", "Sketch an irregular outline") +
+              modeBtn("media", "🖼", "Upload a plan", "Photo or plan — trace it") +
+              "</div>";
+          },
+          wire: function () {
+            document.querySelectorAll("[data-mode]").forEach(function (b) {
+              b.addEventListener("click", function () { ui.mode = b.dataset.mode; cur = 0; rerender(); });
+            });
+          },
+          flags: [],
+        };
+        function modeBtn(mode, ic, t, d) {
+          return '<button type="button" class="choice" data-mode="' + mode + '">' +
+            '<div class="ic2">' + ic + '</div><div class="t">' + t + '</div><div class="d">' + d + "</div></button>";
+        }
+
+        // —— size (rectangle) ————————————————————————————————————————————————————————
+        R.size = {
+          html: function () {
+            return stepHead("Your room's size", "Measure the <strong>inside</strong> — wall to wall, at floor level.") +
+              '<div class="tworow">' + field("width", "Width (ft)", ui.width, "e.g. 40") +
+              field("depth", "Depth (ft)", ui.depth, "e.g. 25") + "</div>" +
+              '<div class="flags" id="flagbox"></div>' + nav();
+          },
+          wire: function () { bindNum("width", "width"); bindNum("depth", "depth"); },
+          flags: ["raw_dimensions_ft", "dimensions", "area", "width_ft", "depth_ft"],
+        };
+
+        // —— extent (irregular) ————————————————————————————————————————————————————————
+        R.extent = {
+          html: function () {
+            return stepHead("Roughly how big?", "Give the overall <strong>width × depth</strong> so we can size the canvas. You'll draw the true outline next.") +
+              '<div class="tworow">' + field("width", "Rough width (ft)", ui.width, "e.g. 40") +
+              field("depth", "Rough depth (ft)", ui.depth, "e.g. 25") + "</div>" +
+              nav(ui.width && ui.depth);
+          },
+          wire: function () { bindNum("width", "width"); bindNum("depth", "depth"); },
+          flags: [],
+        };
+
+        // —— upload (media) ————————————————————————————————————————————————————————————
+        R.upload = {
+          html: function () {
+            var preview = ui.imageDataUrl
+              ? '<div class="stagewrap"><img src="' + ui.imageDataUrl + '" style="max-width:100%;border-radius:12px;border:1px solid var(--line)" /></div>' +
+                '<p class="calibnote">✓ Loaded. Next you\'ll set the scale, then trace the outline.</p>'
+              : "";
+            return stepHead("Upload a plan or photo", "A floor plan, a phone photo of a sketch, a PDF page exported as an image — anything you can see the room in.") +
+              '<label class="uploadbox" id="dropbox"><input type="file" id="file" accept="image/*" />' +
+              (ui.imageDataUrl ? "Tap to replace the image" : "📁 Tap to choose an image") + "</label>" +
+              preview +
+              '<p class="hinttext">Stays on your device — nothing is uploaded to any server.</p>' +
+              nav(!!ui.imageDataUrl);
+          },
+          wire: function () {
+            var f = document.getElementById("file");
+            document.getElementById("dropbox").addEventListener("click", function () { f.click(); });
+            f.addEventListener("click", function (e) { e.stopPropagation(); });
+            f.addEventListener("change", function (e) {
+              var file = e.target.files && e.target.files[0];
+              if (!file) return;
+              var reader = new FileReader();
+              reader.onload = function (ev) {
+                ui.imageDataUrl = ev.target.result;
+                ui.pxPerFt = null; ui.calib = null; ui.polygon_ft = []; ui.usable_polygon_ft = [];
+                var img = new Image();
+                img.onload = function () { ui.imgNatural = { w: img.naturalWidth, h: img.naturalHeight }; rerender(); };
+                img.src = ui.imageDataUrl;
+              };
+              reader.readAsDataURL(file);
+            });
+          },
+          flags: [],
+        };
+
+        // —— scale (media) — click two points of a known length ————————————————————————
+        R.scale = {
+          html: function () {
+            return stepHead("Set the scale", "Click <strong>two points</strong> a known distance apart on the image (a wall, a door, a dimension line), then enter that real length.") +
+              '<div class="stagewrap"><svg class="stage" id="stage"></svg></div>' +
+              '<div class="toolbar"><button class="tool warn" id="clearCalib">Clear points</button></div>' +
+              '<label class="field"><span class="lab">That distance is…</span>' +
+              '<span class="inputrow"><input id="calibLen" type="text" inputmode="decimal" placeholder="e.g. 36" value="' +
+              (ui.calib && ui.calib.lengthFt ? ui.calib.lengthFt : "") + '" /><span class="unit">feet</span></span></label>' +
+              '<p class="calibnote" id="calibState"></p>' + nav(!!ui.pxPerFt);
+          },
+          wire: function () {
+            var svg = document.getElementById("stage");
+            paintScale();
+            svg.addEventListener("click", function (evt) {
+              var view = makeStage(svg, { image: true });
+              var p = view.toViewBox(evt.clientX, evt.clientY); if (!p) return;
+              if (!ui.calib || (ui.calib.a && ui.calib.b)) ui.calib = { a: p, b: null, lengthFt: ui.calib ? ui.calib.lengthFt : null };
+              else ui.calib.b = p;
+              recomputeScale(); paintScale(); updateCalibState(); syncNav();
+            });
+            document.getElementById("clearCalib").addEventListener("click", function () {
+              ui.calib = null; ui.pxPerFt = null; paintScale(); updateCalibState(); syncNav();
+            });
+            document.getElementById("calibLen").addEventListener("input", function (e) {
+              if (!ui.calib) ui.calib = { a: null, b: null, lengthFt: null };
+              ui.calib.lengthFt = parseNum(e.target.value); recomputeScale(); updateCalibState(); syncNav();
+            });
+            updateCalibState();
+            function paintScale() {
+              var v = makeStage(svg, { image: true });
+              var parts = [v.bg];
+              if (ui.calib && ui.calib.a) {
+                parts.push(dot(ui.calib.a));
+                if (ui.calib.b) {
+                  parts.push('<line x1="' + ui.calib.a[0] + '" y1="' + ui.calib.a[1] + '" x2="' + ui.calib.b[0] + '" y2="' + ui.calib.b[1] + '" stroke="#0b63c4" stroke-width="2" stroke-dasharray="5 4" />');
+                  parts.push(dot(ui.calib.b));
+                }
+              }
+              v.svg.innerHTML = parts.join("");
+            }
+            function dot(p) { return '<circle cx="' + p[0] + '" cy="' + p[1] + '" r="6" fill="#0b63c4" stroke="#fff" stroke-width="2" />'; }
+            function updateCalibState() {
+              var el = document.getElementById("calibState"); if (!el) return;
+              if (ui.pxPerFt) el.innerHTML = "✓ Scale set. Re-click the image to redo it.";
+              else if (ui.calib && ui.calib.a && ui.calib.b) el.textContent = "Now enter how long that line is, in feet.";
+              else el.textContent = "Click the first point…";
+            }
+            function syncNav() { var n = document.querySelector("[data-next]"); if (n) n.disabled = !ui.pxPerFt; }
+          },
+          flags: [],
+        };
+
+        // —— outline (irregular + media) — draw the room polygon ————————————————————————
+        R.outline = {
+          html: function () {
+            return stepHead("Trace the room outline", "Click each corner. Click the first point again (or “Close shape”) to finish. Drag any dot to adjust.") +
+              '<div class="stagewrap"><svg class="stage" id="stage"></svg></div>' +
+              '<div class="toolbar"><button class="tool" id="undoPt">Undo point</button>' +
+              '<button class="tool" id="closePoly">Close shape</button>' +
+              '<button class="tool warn" id="clearPoly">Clear</button></div>' +
+              '<p class="calibnote" id="polyState"></p>' +
+              '<div class="flags" id="flagbox"></div>' + nav(ui.polygon_ft.length >= 3);
+          },
+          wire: function () { wirePolygon("polygon_ft", "#0b63c4", "#eef6ff"); },
+          flags: ["polygon_ft", "area", "degenerate_polygon", "poly_rect_mismatch"],
+        };
+
+        // —— usable (all) — highlight the green usable region ——————————————————————————
+        R.usable = {
+          html: function () {
+            var hasUsable = ui.usable_polygon_ft.length >= 3;
+            return stepHead("Highlight the usable area", "Draw the area you want games in — the <strong>green box</strong>. Leave it as the whole room, or carve out entries, counters, walkways.") +
+              '<label class="check"><input type="checkbox" id="wholeRoom" ' + (hasUsable ? "" : "checked") + ' />' +
+              '<span class="ct">Use the whole room as usable<small>Uncheck to draw a smaller green area.</small></span></label>' +
+              '<div id="usableEditor" class="' + (hasUsable ? "" : "hidden") + '">' +
+              '<div class="stagewrap"><svg class="stage" id="stage"></svg></div>' +
+              '<div class="toolbar"><button class="tool" id="undoPt">Undo point</button>' +
+              '<button class="tool" id="closePoly">Close shape</button>' +
+              '<button class="tool warn" id="clearPoly">Clear</button></div>' +
+              '<p class="calibnote" id="polyState"></p></div>' +
+              '<div class="flags" id="flagbox"></div>' + nav();
+          },
+          wire: function () {
+            if (ui.usable_polygon_ft.length >= 3) wirePolygon("usable_polygon_ft", "#1f9d55", "#e7f6ee");
+            document.getElementById("wholeRoom").addEventListener("change", function (e) {
+              if (e.target.checked) ui.usable_polygon_ft = [];
+              else if (ui.usable_polygon_ft.length === 0) {
+                // seed a draggable starter box at ~85% of the room so there's something to edit
+                seedUsableBox();
+              }
+              rerender();
+            });
+          },
+          flags: ["usable_polygon_ft", "usable_exceeds_room", "area"],
+        };
+        function seedUsableBox() {
+          var ext = roomExtentFt();
+          var mx = ext.w * 0.08, my = ext.d * 0.08;
+          ui.usable_polygon_ft = [
+            [+(mx).toFixed(1), +(my).toFixed(1)],
+            [+(ext.w - mx).toFixed(1), +(my).toFixed(1)],
+            [+(ext.w - mx).toFixed(1), +(ext.d - my).toFixed(1)],
+            [+(mx).toFixed(1), +(ext.d - my).toFixed(1)],
+          ];
+        }
+
+        // —— door (all) ————————————————————————————————————————————————————————————————
+        R.door = {
+          html: function () {
+            return stepHead("The door — measured the right way", "The <strong>#1 mistake.</strong> Measure the <strong>clear opening</strong> (gap with the door open), in <strong>inches</strong>.") +
+              doorDiagram() +
+              field("door", "Door clear opening (in)", ui.door, "e.g. 36", ui.doorUnknown) +
+              '<label class="check"><input type="checkbox" id="doorInside" ' + (ui.doorInside ? "checked" : "") + ' />' +
+              '<span class="ct">I measured the <strong>inside of the frame</strong>, door open<small>Not the slab, not the trim. Double doors: both open.</small></span></label>' +
+              '<label class="check"><input type="checkbox" id="doorUnknown" ' + (ui.doorUnknown ? "checked" : "") + ' />' +
+              '<span class="ct">I don\'t know it yet<small>We\'ll assume a standard 36" door and flag it.</small></span></label>' +
+              '<div class="flags" id="flagbox"></div>' + nav();
+          },
+          wire: function () {
+            bindNum("door", "door"); bindCheck("doorInside", "doorInside");
+            document.getElementById("doorUnknown").addEventListener("change", function (e) {
+              ui.doorUnknown = e.target.checked;
+              var d = document.getElementById("door"); if (d) d.disabled = e.target.checked;
+              rerenderFlags();
+            });
+          },
+          flags: ["doors"],
+        };
+
+        // —— ceiling (all) ——————————————————————————————————————————————————————————————
+        R.ceiling = {
+          html: function () {
+            return stepHead("Ceiling height", "Optional for the count — <strong>required</strong> for tall attractions (VR rigs, towers, ropes courses). Floor to ceiling, in feet.") +
+              field("ceiling", "Ceiling height (ft)", ui.ceiling, "e.g. 10 (optional)") +
+              '<label class="check"><input type="checkbox" id="ropes" ' + (ui.ropes ? "checked" : "") + ' />' +
+              '<span class="ct">I might want something tall<small>VR rig, tower, or ropes course — flags a height-clearance check.</small></span></label>' +
+              '<div class="flags" id="flagbox"></div>' + nav();
+          },
+          wire: function () { bindNum("ceiling", "ceiling"); bindCheck("ropes", "ropes"); },
+          flags: ["ceiling_height_ft"],
+        };
+
+        // —— pillars (all) ——————————————————————————————————————————————————————————————
+        R.pillars = {
+          html: function () {
+            return stepHead("Pillars & obstructions", "Anything standing in the room takes away usable floor: <strong>support pillars, columns, low beams, panels.</strong> Tap the floor to drop one.") +
+              '<label class="check"><input type="checkbox" id="noObstr" ' + (ui.noObstr ? "checked" : "") + ' />' +
+              '<span class="ct">My room is clear — no interior obstructions</span></label>' +
+              '<div id="canvasArea" class="' + (ui.noObstr ? "hidden" : "") + '">' +
+              '<div class="stagewrap"><svg class="stage" id="stage"></svg></div>' +
+              '<p class="hinttext">Tap inside the room to add a pillar (≈2×2 ft). Tap a pillar to remove it.</p>' +
+              '<div class="pillarlist" id="pillarList"></div></div>' +
+              '<div class="flags" id="flagbox"></div>' + nav();
+          },
+          wire: function () {
+            bindCheck("noObstr", "noObstr", function () {
+              document.getElementById("canvasArea").classList.toggle("hidden", ui.noObstr); rerender();
+            });
+            if (!ui.noObstr) wirePillars();
+          },
+          flags: ["pillars"],
+        };
+
+        // —— review (all) ———————————————————————————————————————————————————————————————
+        R.review = {
+          html: function (res) {
+            return stepHead("Your usable space", "A draft estimate for review — not a code-compliance certification.") +
+              '<div class="stagewrap"><svg class="stage" id="stage"></svg></div>' +
+              '<div class="review-line"><span class="k">Usable area</span><span class="v">' +
+                (res.usable_sqft !== null ? Math.round(res.usable_sqft).toLocaleString() + " sq ft" : "—") + "</span></div>" +
+              '<div class="review-line"><span class="k">Estimated games (÷70)</span><span class="v">' +
+                (res.game_count !== null ? "≈ " + res.game_count + " games" : "—") + "</span></div>" +
+              '<div class="review-line"><span class="k">Confidence</span><span class="v">' + res.confidence.toUpperCase() + "</span></div>" +
+              routeBox(res) +
+              '<div class="sectit">Why ' + res.confidence.toUpperCase() + "</div><ul class='reasons'>" +
+                res.confidence_reasons.map(function (r) { return "<li>" + escapeHtml(r) + "</li>"; }).join("") + "</ul>" +
+              (res.inconsistencies.length ? '<div class="sectit">Flags to resolve</div><div class="flags">' + res.inconsistencies.map(flagHtml).join("") + "</div>" : "") +
+              '<div class="sectit">Standard caveats</div><ul class="caveats">' +
+                res.caveats.map(function (c) { return "<li>" + escapeHtml(c) + "</li>"; }).join("") + "</ul>" +
+              '<details class="json"><summary>Show the data we captured (RoomInput JSON)</summary><pre id="rJson"></pre></details>' +
+              '<div class="nav"><button class="btn ghost" data-back>← Back</button>' +
+              '<button class="btn ghost" id="copyBtn">Copy JSON</button>' +
+              '<button class="btn primary" id="downloadBtn">Download</button></div>' +
+              '<div class="nav"><button class="btn ghost" id="restartBtn" style="flex:1">Start over</button></div>';
+          },
+          wire: function () {
+            var svg = document.getElementById("stage");
+            var view = makeStage(svg, { image: ui.mode === "media" && !!ui.pxPerFt });
+            paintReview(view);
+            document.getElementById("rJson").textContent = JSON.stringify(buildRoom(), null, 2);
+            document.getElementById("copyBtn").addEventListener("click", function () {
+              var t = JSON.stringify(buildRoom(), null, 2);
+              if (navigator.clipboard) navigator.clipboard.writeText(t);
+              this.textContent = "Copied ✓"; var s = this; setTimeout(function () { s.textContent = "Copy JSON"; }, 1500);
+            });
+            document.getElementById("downloadBtn").addEventListener("click", function () {
+              var blob = new Blob([JSON.stringify(buildRoom(), null, 2)], { type: "application/json" });
+              var a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "betson-room.json"; a.click();
+            });
+            document.getElementById("restartBtn").addEventListener("click", function () { ui = freshState(); cur = 0; rerender(); });
+          },
+          flags: [],
+        };
+
+        // ── shared HTML builders ─────────────────────────────────────────────────────
+        function stepHead(title, lead) {
+          var list = stepList();
+          return '<div class="stepno">Step ' + (cur + 1) + " of " + list.length + "</div><h2>" + title + "</h2><p class='lead'>" + lead + "</p>";
+        }
+        function field(id, lab, val, ph, disabled) {
+          return '<label class="field"><span class="lab">' + lab + "</span>" +
+            '<span class="inputrow"><input id="' + id + '" type="text" inputmode="decimal" placeholder="' + ph + '" value="' +
+            (val !== null && val !== undefined ? val : "") + '"' + (disabled ? " disabled" : "") + " /></span></label>";
+        }
+        // nextEnabled: pass false to disable the Next button (gates a step)
+        function nav(nextEnabled) {
+          var list = stepList();
+          if (cur >= list.length - 1) return ""; // review supplies its own nav
+          var back = cur > 0 ? '<button class="btn ghost" data-back>← Back</button>' : "";
+          var dis = nextEnabled === false ? " disabled" : "";
+          return '<div class="nav">' + back + '<button class="btn primary" data-next' + dis + ">Next →</button></div>";
+        }
+        function routeBox(res) {
+          if (res.ready_for_throughput)
+            return '<div class="routebox go">✓ <strong>Ready to plan.</strong> Everything checks out — this can go straight to a draft layout.</div>';
+          return '<div class="routebox hold"><strong>A Betson specialist will review this with you.</strong> Nothing\'s wrong — your input just has open questions, so a human confirms before we plan.</div>';
+        }
+        function doorDiagram() {
+          return '<div class="diagram" aria-hidden="true"><svg viewBox="0 0 200 120">' +
+            '<rect x="20" y="14" width="160" height="92" rx="3" fill="#f4f7fb" stroke="#c4d2e6" stroke-width="2" />' +
+            '<rect x="60" y="22" width="80" height="84" fill="#fff" stroke="#1a2230" stroke-width="2.5" />' +
+            '<path d="M60 64 a40 40 0 0 1 -16 -34" fill="none" stroke="#0b63c4" stroke-width="1.6" stroke-dasharray="3 3" />' +
+            '<line x1="60" y1="112" x2="140" y2="112" stroke="#1f9d55" stroke-width="2.5" />' +
+            '<text x="100" y="108" text-anchor="middle" font-size="11" font-weight="700" fill="#15623a">clear opening</text></svg></div>';
+        }
+
+        // ── input binding helpers ────────────────────────────────────────────────────
+        function bindNum(id, key) {
+          var el = document.getElementById(id); if (!el) return;
+          el.addEventListener("input", function (e) { ui[key] = parseNum(e.target.value); rerenderLive(); });
+        }
+        function bindCheck(id, key, after) {
+          var el = document.getElementById(id); if (!el) return;
+          el.addEventListener("change", function (e) { ui[key] = e.target.checked; (after || rerenderLive)(); });
+        }
+
+        // ── polygon editor (used by outline + usable) ────────────────────────────────
+        var drag = null; // {key, idx}
+        function wirePolygon(key, stroke, fill) {
+          var svg = document.getElementById("stage");
+          paintPoly();
+          function curView() { return makeStage(svg, { image: ui.mode === "media" && !!ui.pxPerFt }); }
+          function paintPoly() {
+            var v = curView();
+            var parts = [v.bg];
+            // faint room outline beneath the usable editor for context
+            if (key === "usable_polygon_ft") {
+              if (ui.polygon_ft.length >= 3) parts.push('<path d="' + polyToPath(v, ui.polygon_ft) + '" fill="#f4f7fb" stroke="#c4d2e6" stroke-width="1.5" />');
+              else if (ui.mode === "rectangle" && ui.width && ui.depth)
+                parts.push('<path d="' + polyToPath(v, [[0,0],[ui.width,0],[ui.width,ui.depth],[0,ui.depth]]) + '" fill="#f4f7fb" stroke="#c4d2e6" stroke-width="1.5" />');
+            }
+            var pts = ui[key];
+            parts.push('<path d="' + polyToPath(v, pts) + '" fill="' + (pts.length >= 3 ? fill : "none") + '" fill-opacity="0.6" stroke="' + stroke + '" stroke-width="2.5" stroke-linejoin="round" />');
+            pts.forEach(function (p, i) {
+              var q = v.toPx(p);
+              parts.push('<circle class="vtx" data-idx="' + i + '" cx="' + q[0].toFixed(1) + '" cy="' + q[1].toFixed(1) + '" r="7" fill="#fff" stroke="' + stroke + '" stroke-width="2.5" />');
+            });
+            if (pts.length >= 3) {
+              var b = polyBBox(pts), mid = v.toPx([(b[0]+b[2])/2, (b[1]+b[3])/2]);
+              parts.push('<text x="' + mid[0] + '" y="' + mid[1] + '" text-anchor="middle" font-size="13" font-weight="700" fill="' + stroke + '">' + Math.round(polyArea(pts)).toLocaleString() + ' sq ft</text>');
+            }
+            v.svg.innerHTML = parts.join("");
+            var st = document.getElementById("polyState");
+            if (st) st.textContent = pts.length < 3 ? (pts.length + " point" + (pts.length === 1 ? "" : "s") + " — need at least 3.") : (pts.length + " corners · " + Math.round(polyArea(pts)).toLocaleString() + " sq ft");
+          }
+          svg.onclick = function (evt) {
+            if (drag) return;
+            if (evt.target && evt.target.classList && evt.target.classList.contains("vtx")) return;
+            var v = curView();
+            var ft = v.toFt(evt.clientX, evt.clientY); if (!ft) return;
+            var pts = ui[key];
+            if (pts.length >= 3) {
+              var first = v.toPx(pts[0]), pt = v.toPx(ft);
+              if (Math.hypot(pt[0]-first[0], pt[1]-first[1]) < 14) { rerenderLive(); return; }
+            }
+            pts.push([Math.round(ft[0]*10)/10, Math.round(ft[1]*10)/10]);
+            paintPoly(); rerenderMirrorOnly();
+          };
+          svg.onpointerdown = function (evt) {
+            var t = evt.target;
+            if (t && t.classList && t.classList.contains("vtx")) {
+              drag = { key: key, idx: Number(t.dataset.idx) };
+              try { svg.setPointerCapture(evt.pointerId); } catch (e) {}
+              evt.preventDefault();
+            }
+          };
+          svg.onpointermove = function (evt) {
+            if (!drag) return;
+            var v = curView();
+            var ft = v.toFt(evt.clientX, evt.clientY); if (!ft) return;
+            ui[drag.key][drag.idx] = [Math.round(ft[0]*10)/10, Math.round(ft[1]*10)/10];
+            paintPoly(); rerenderMirrorOnly();
+          };
+          svg.onpointerup = function (evt) {
+            if (drag) { drag = null; try { svg.releasePointerCapture(evt.pointerId); } catch (e) {} rerenderLive(); }
+          };
+          var u = document.getElementById("undoPt"); if (u) u.onclick = function () { ui[key].pop(); paintPoly(); rerenderLive(); };
+          var cl = document.getElementById("closePoly"); if (cl) cl.onclick = function () { rerenderLive(); };
+          var clr = document.getElementById("clearPoly"); if (clr) clr.onclick = function () { ui[key] = []; paintPoly(); rerenderLive(); };
+        }
+
+        // ── pillar editor ────────────────────────────────────────────────────────────
+        function wirePillars() {
+          var svg = document.getElementById("stage");
+          paint();
+          function curView() { return makeStage(svg, { image: ui.mode === "media" && !!ui.pxPerFt }); }
+          function paint() {
+            var v = curView();
+            var parts = [v.bg];
+            if (ui.polygon_ft.length >= 3) parts.push('<path d="' + polyToPath(v, ui.polygon_ft) + '" fill="#fbfdff" stroke="#0b63c4" stroke-width="2" />');
+            else if (ui.width && ui.depth) parts.push('<path d="' + polyToPath(v, [[0,0],[ui.width,0],[ui.width,ui.depth],[0,ui.depth]]) + '" fill="#fbfdff" stroke="#0b63c4" stroke-width="2" />');
+            ui.pillars.forEach(function (p, idx) {
+              var q = v.toPx([p.x_ft, p.y_ft]); var pw = Math.max((p.w_ft||2)*(v.scale||6), 8);
+              parts.push('<rect class="vtx" data-pill="' + idx + '" x="' + (q[0]-pw/2).toFixed(1) + '" y="' + (q[1]-pw/2).toFixed(1) + '" width="' + pw + '" height="' + pw + '" rx="2" fill="#1a2230" opacity="0.82" />');
+              parts.push('<text x="' + q[0] + '" y="' + (q[1]+3) + '" text-anchor="middle" font-size="9" fill="#fff" font-weight="700" pointer-events="none">' + (idx+1) + '</text>');
+            });
+            v.svg.innerHTML = parts.join("");
+            var list = document.getElementById("pillarList");
+            if (list) {
+              list.innerHTML = ui.pillars.map(function (p, i) {
+                return '<span class="pillarchip">Pillar ' + (i+1) + " · " + Math.round(p.x_ft) + "," + Math.round(p.y_ft) + " ft<button type=\"button\" data-rm=\"" + i + "\">✕</button></span>";
+              }).join("");
+              list.querySelectorAll("[data-rm]").forEach(function (b) {
+                b.onclick = function () { ui.pillars.splice(Number(b.dataset.rm), 1); paint(); rerenderLive(); };
+              });
+            }
+          }
+          svg.onclick = function (evt) {
+            var t = evt.target;
+            if (t && t.dataset && t.dataset.pill !== undefined) { ui.pillars.splice(Number(t.dataset.pill), 1); paint(); rerenderLive(); return; }
+            var v = curView();
+            var ft = v.toFt(evt.clientX, evt.clientY); if (!ft) return;
+            ui.pillars.push({ x_ft: Math.round(ft[0]*10)/10, y_ft: Math.round(ft[1]*10)/10, w_ft: 2, d_ft: 2 });
+            paint(); rerenderMirrorOnly();
+          };
+        }
+
+        // ── review painter ───────────────────────────────────────────────────────────
+        function paintReview(view) {
+          var parts = [view.bg];
+          var room = ui.polygon_ft.length >= 3 ? ui.polygon_ft : (ui.width && ui.depth ? [[0,0],[ui.width,0],[ui.width,ui.depth],[0,ui.depth]] : null);
+          if (room) parts.push('<path d="' + polyToPath(view, room) + '" fill="#fbfdff" stroke="#0b63c4" stroke-width="2" />');
+          var usable = ui.usable_polygon_ft.length >= 3 ? ui.usable_polygon_ft : room;
+          if (usable) parts.push('<path d="' + polyToPath(view, usable) + '" fill="#e7f6ee" fill-opacity="0.65" stroke="#1f9d55" stroke-width="2.5" />');
+          (ui.noObstr ? [] : ui.pillars).forEach(function (p) {
+            var q = view.toPx([p.x_ft, p.y_ft]); var pw = Math.max((p.w_ft||2)*(view.scale||6), 8);
+            parts.push('<rect x="' + (q[0]-pw/2) + '" y="' + (q[1]-pw/2) + '" width="' + pw + '" height="' + pw + '" rx="2" fill="#1a2230" opacity="0.82" />');
+          });
+          view.svg.innerHTML = parts.join("");
+        }
+
+        function recomputeScale() {
+          if (ui.calib && ui.calib.a && ui.calib.b && ui.calib.lengthFt && ui.calib.lengthFt > 0) {
+            var dx = ui.calib.b[0] - ui.calib.a[0], dy = ui.calib.b[1] - ui.calib.a[1];
+            var px = Math.sqrt(dx*dx + dy*dy);
+            ui.pxPerFt = px > 0 ? px / ui.calib.lengthFt : null;
+          } else ui.pxPerFt = null;
+        }
+
+        // ── render orchestration ─────────────────────────────────────────────────────
+        function activeStepId() { return stepList()[cur]; }
+        function rerender() {
+          var id = activeStepId();
+          var res = compute();
+          var card = document.getElementById("stepCard");
+          card.innerHTML = R[id].html(res);
+          var list = stepList();
+          var dots = document.getElementById("dots"); dots.innerHTML = "";
+          for (var i = 0; i < list.length; i++) {
+            var dot = document.createElement("div");
+            dot.className = "dot" + (i < cur ? " done" : i === cur ? " active" : "");
+            dots.appendChild(dot);
+          }
+          card.querySelectorAll("[data-next]").forEach(function (b) { b.addEventListener("click", function () { go(cur + 1); }); });
+          card.querySelectorAll("[data-back]").forEach(function (b) { b.addEventListener("click", function () { go(cur - 1); }); });
+          R[id].wire(res);
+          renderMirror(res);
+          rerenderFlags();
+          window.scrollTo({ top: 0, behavior: "smooth" });
+        }
+        // light refresh: recompute engine, update mirror + inline flags + the Next gate
+        // WITHOUT rebuilding the step DOM (inputs keep focus, canvases keep listeners).
+        function rerenderLive() { var res = compute(); renderMirror(res); rerenderFlags(); syncNav(); }
+        function rerenderMirrorOnly() { renderMirror(compute()); syncNav(); }
+        // Gated steps don't rebuild their DOM on every edit, so the Next button's
+        // disabled state must be re-synced live as the gate condition becomes true.
+        function nextGate(id) {
+          if (id === "extent") return !!(ui.width && ui.depth);
+          if (id === "upload") return !!ui.imageDataUrl;
+          if (id === "scale") return !!ui.pxPerFt;
+          if (id === "outline") return ui.polygon_ft.length >= 3;
+          return true;
+        }
+        function syncNav() {
+          var btn = document.querySelector("[data-next]");
+          if (btn) btn.disabled = !nextGate(activeStepId());
+        }
+        function rerenderFlags() {
+          var id = activeStepId();
+          var box = document.getElementById("flagbox"); if (!box) return;
+          var res = compute();
+          var html = flagsForFields(res, R[id].flags || []);
+          if (!html && id === "size" && res.usable_sqft !== null) {
+            html = '<div class="ok-note">✓ ' + Math.round(res.usable_sqft).toLocaleString() + " sq ft → about " + res.game_count + " games. Looks consistent.</div>";
+          }
+          box.innerHTML = html;
+        }
+        function go(n) {
+          var list = stepList();
+          cur = Math.max(0, Math.min(list.length - 1, n));
+          rerender();
+        }
+
+        rerender();
+      })();
+    </script>
+  </body>
+</html>
