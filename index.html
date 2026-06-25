@@ -685,8 +685,10 @@
                 res.caveats.map(function (c) { return "<li>" + escapeHtml(c) + "</li>"; }).join("") + "</ul>" +
               '<details class="json"><summary>Show the data we captured (RoomInput JSON)</summary><pre id="rJson"></pre></details>' +
               '<div class="nav"><button class="btn ghost" data-back>← Back</button>' +
-              '<button class="btn ghost" id="copyBtn">Copy JSON</button>' +
-              '<button class="btn primary" id="downloadBtn">Download</button></div>' +
+              '<button class="btn ghost" id="copyBtn" style="flex:1">Copy JSON</button></div>' +
+              '<div class="nav">' +
+              '<button class="btn ghost" id="downloadBtn" style="flex:1">⬇ JSON file</button>' +
+              '<button class="btn primary" id="downloadPdfBtn" style="flex:1">⬇ PDF report</button></div>' +
               '<div class="nav"><button class="btn ghost" id="restartBtn" style="flex:1">Start over</button></div>';
           },
           wire: function () {
@@ -702,6 +704,11 @@
             document.getElementById("downloadBtn").addEventListener("click", function () {
               var blob = new Blob([JSON.stringify(buildRoom(), null, 2)], { type: "application/json" });
               var a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "betson-room.json"; a.click();
+            });
+            document.getElementById("downloadPdfBtn").addEventListener("click", function () {
+              var blob = buildPdfBlob(compute());
+              var a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "betson-room-plan.pdf"; a.click();
+              setTimeout(function () { URL.revokeObjectURL(a.href); }, 4000);
             });
             document.getElementById("restartBtn").addEventListener("click", function () { ui = freshState(); cur = 0; rerender(); });
           },
@@ -772,9 +779,11 @@
             var parts = [v.bg];
             // faint room outline beneath the usable editor for context
             if (key === "usable_polygon_ft") {
-              if (ui.polygon_ft.length >= 3) parts.push('<path d="' + polyToPath(v, ui.polygon_ft) + '" fill="#f4f7fb" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="5 4" />');
+              // context outline only — keep the fill transparent so an uploaded plan
+              // image (media mode) shows through instead of being hidden by white.
+              if (ui.polygon_ft.length >= 3) parts.push('<path d="' + polyToPath(v, ui.polygon_ft) + '" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="5 4" />');
               else if (ui.mode === "rectangle" && ui.width && ui.depth)
-                parts.push('<path d="' + polyToPath(v, [[0,0],[ui.width,0],[ui.width,ui.depth],[0,ui.depth]]) + '" fill="#f4f7fb" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="5 4" />');
+                parts.push('<path d="' + polyToPath(v, [[0,0],[ui.width,0],[ui.width,ui.depth],[0,ui.depth]]) + '" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="5 4" />');
             }
             var pts = ui[key];
             parts.push('<path d="' + polyToPath(v, pts) + '" fill="' + (pts.length >= 3 ? fill : "none") + '" fill-opacity="0.6" stroke="' + stroke + '" stroke-width="2.5" stroke-linejoin="round" />');
@@ -834,8 +843,10 @@
           function paint() {
             var v = curView();
             var parts = [v.bg];
-            if (ui.polygon_ft.length >= 3) parts.push('<path d="' + polyToPath(v, ui.polygon_ft) + '" fill="#fbfdff" stroke="#0b63c4" stroke-width="2" />');
-            else if (ui.width && ui.depth) parts.push('<path d="' + polyToPath(v, [[0,0],[ui.width,0],[ui.width,ui.depth],[0,ui.depth]]) + '" fill="#fbfdff" stroke="#0b63c4" stroke-width="2" />');
+            // transparent room fill over an uploaded image so the plan shows through
+            var roomFill = v.image ? "none" : "#fbfdff";
+            if (ui.polygon_ft.length >= 3) parts.push('<path d="' + polyToPath(v, ui.polygon_ft) + '" fill="' + roomFill + '" stroke="#0b63c4" stroke-width="2" />');
+            else if (ui.width && ui.depth) parts.push('<path d="' + polyToPath(v, [[0,0],[ui.width,0],[ui.width,ui.depth],[0,ui.depth]]) + '" fill="' + roomFill + '" stroke="#0b63c4" stroke-width="2" />');
             ui.pillars.forEach(function (p, idx) {
               var q = v.toPx([p.x_ft, p.y_ft]); var pw = Math.max((p.w_ft||2)*(v.scale||6), 8);
               parts.push('<rect class="vtx" data-pill="' + idx + '" x="' + (q[0]-pw/2).toFixed(1) + '" y="' + (q[1]-pw/2).toFixed(1) + '" width="' + pw + '" height="' + pw + '" rx="2" fill="#1a2230" opacity="0.82" />');
@@ -865,8 +876,11 @@
         // ── review painter ───────────────────────────────────────────────────────────
         function paintReview(view) {
           var parts = [view.bg];
+          // over an uploaded plan (media mode) the room fill stays transparent so the
+          // image isn't hidden by a solid white block; opaque only on the blank canvas.
+          var roomFill = view.image ? "none" : "#fbfdff";
           var room = ui.polygon_ft.length >= 3 ? ui.polygon_ft : (ui.width && ui.depth ? [[0,0],[ui.width,0],[ui.width,ui.depth],[0,ui.depth]] : null);
-          if (room) parts.push('<path d="' + polyToPath(view, room) + '" fill="#fbfdff" stroke="#0b63c4" stroke-width="2" />');
+          if (room) parts.push('<path d="' + polyToPath(view, room) + '" fill="' + roomFill + '" stroke="#0b63c4" stroke-width="2" />');
           var usable = ui.usable_polygon_ft.length >= 3 ? ui.usable_polygon_ft : room;
           if (usable) parts.push('<path d="' + polyToPath(view, usable) + '" fill="#e7f6ee" fill-opacity="0.65" stroke="#1f9d55" stroke-width="2.5" />');
           (ui.noObstr ? [] : ui.pillars).forEach(function (p) {
@@ -874,6 +888,181 @@
             parts.push('<rect x="' + (q[0]-pw/2) + '" y="' + (q[1]-pw/2) + '" width="' + pw + '" height="' + pw + '" rx="2" fill="#1a2230" opacity="0.82" />');
           });
           view.svg.innerHTML = parts.join("");
+        }
+
+        // ════════════════════════════════════════════════════════════════════════════
+        //  PDF EXPORT  — a shareable .pdf of the estimate, downloadable alongside the
+        //  RoomInput JSON. Hand-rolled minimal PDF 1.4 (Helvetica text + a simple vector
+        //  floor plan): zero dependencies, no build step, no network — the same
+        //  browser-only / offline-first doctrine as the rest of this file.
+        // ════════════════════════════════════════════════════════════════════════════
+        function buildPdfBlob(res) {
+          var W = 612, H = 792, margin = 54;          // US Letter, in points (1/72")
+          var pages = [[]], pi = 0, y = H - margin;   // op-strings per page; y = flow cursor
+          function add(s) { pages[pi].push(s); }
+          function newPage() { pages.push([]); pi = pages.length - 1; y = H - margin; }
+          function need(h) { if (y - h < margin) newPage(); }
+          // PDF text strings are Latin-1 / ASCII — fold common typography to ASCII and
+          // drop the rest so byte offsets (xref) stay exact and glyphs don't garble.
+          function ascii(s) {
+            return String(s)
+              .replace(/[‘’]/g, "'").replace(/[“”]/g, '"')
+              .replace(/[–—]/g, "-").replace(/…/g, "...")
+              .replace(/×/g, "x").replace(/≈/g, "~").replace(/→/g, "->")
+              .replace(/÷/g, "/").replace(/[^\x20-\x7E]/g, "");
+          }
+          function esc(s) { return ascii(s).replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)"); }
+          function rgb(hex) {
+            var n = parseInt(hex.slice(1), 16);
+            return ((n >> 16 & 255) / 255).toFixed(3) + " " + ((n >> 8 & 255) / 255).toFixed(3) + " " + ((n & 255) / 255).toFixed(3);
+          }
+          // one flowing text block; greedy word-wrap to the content width, auto page-break
+          function line(str, opt) {
+            opt = opt || {};
+            var size = opt.size || 11, indent = opt.indent || 0;
+            var color = opt.color || "#1a2230", lead = (opt.lead != null ? opt.lead : 4);
+            var maxChars = Math.max(8, Math.floor((W - 2 * margin - indent) / (size * 0.52)));
+            var words = ascii(str).split(/\s+/), rows = [], row = "";
+            for (var i = 0; i < words.length; i++) {
+              var t = row ? row + " " + words[i] : words[i];
+              if (t.length > maxChars && row) { rows.push(row); row = words[i]; } else row = t;
+            }
+            if (row) rows.push(row);
+            if (!rows.length) rows = [""];
+            for (var r = 0; r < rows.length; r++) {
+              need(size + 2); y -= size;
+              add("BT " + (opt.bold ? "/F2" : "/F1") + " " + size + " Tf " + rgb(color) + " rg " +
+                  (margin + indent) + " " + y.toFixed(2) + " Td (" + esc(rows[r]) + ") Tj ET");
+              y -= 2;
+            }
+            y -= lead;
+          }
+          function gap(h) { need(h); y -= h; }
+          function divider() { need(12); y -= 6; add(rgb("#d7dee8") + " RG 0.8 w " + margin + " " + y.toFixed(2) + " m " + (W - margin) + " " + y.toFixed(2) + " l S"); y -= 10; }
+
+          // ── header band ──
+          add(rgb("#0f1419") + " rg 0 " + (H - 86) + " " + W + " 86 re f");
+          add("BT /F2 20 Tf 1 1 1 rg " + margin + " " + (H - 50) + " Td (Betson Game-Floor Planner) Tj ET");
+          add("BT /F1 10 Tf 0.78 0.83 0.88 rg " + margin + " " + (H - 70) + " Td (Usable-space estimate - a draft for review, not a code-compliance certification.) Tj ET");
+          y = H - 86 - 26;
+
+          // ── metric dashboard (three columns) ──
+          var cols = [
+            { label: "Usable area", value: (res.usable_sqft !== null ? Math.round(res.usable_sqft).toLocaleString() + " sq ft" : "N/A") },
+            { label: "Estimated games (per 70 sq ft)", value: (res.game_count !== null ? "~ " + res.game_count.toLocaleString() : "N/A") },
+            { label: "Confidence", value: String(res.confidence || "").toUpperCase() },
+          ];
+          need(46);
+          var colW = (W - 2 * margin) / 3;
+          for (var c = 0; c < cols.length; c++) {
+            var cx = margin + c * colW;
+            add("BT /F1 8.5 Tf " + rgb("#5b6b80") + " rg " + cx.toFixed(1) + " " + (y - 2).toFixed(1) + " Td (" + esc(cols[c].label) + ") Tj ET");
+            add("BT /F2 17 Tf " + rgb("#0b63c4") + " rg " + cx.toFixed(1) + " " + (y - 22).toFixed(1) + " Td (" + esc(cols[c].value) + ") Tj ET");
+          }
+          y -= 40;
+          line(res.ready_for_throughput
+            ? "Ready to plan - everything checks out; this can go straight to a draft layout."
+            : "A Betson specialist will review this with you - the input has open questions to confirm before planning.",
+            { size: 10, bold: true, color: res.ready_for_throughput ? "#15623a" : "#7a5212", lead: 6 });
+          divider();
+
+          // ── vector floor plan ──
+          drawFloorPlan();
+          divider();
+
+          // ── why this confidence ──
+          line("Why " + String(res.confidence || "").toUpperCase(), { size: 12, bold: true, lead: 2 });
+          (res.confidence_reasons || []).forEach(function (rr) { line("-  " + rr, { size: 10, indent: 8, color: "#5b6b80", lead: 2 }); });
+          gap(6);
+
+          // ── flags to resolve ──
+          if (res.inconsistencies && res.inconsistencies.length) {
+            line("Flags to resolve", { size: 12, bold: true, lead: 2 });
+            res.inconsistencies.forEach(function (ic) {
+              line((ic.severity === "blocking" ? "[blocking]  " : "[warning]  ") + ic.message,
+                { size: 10, bold: true, indent: 8, color: ic.severity === "blocking" ? "#8a261b" : "#7a5212", lead: 1 });
+              if (ic.hint) line(ic.hint, { size: 9, indent: 22, color: "#5b6b80", lead: 2 });
+            });
+            gap(6);
+          }
+
+          // ── standard caveats ──
+          line("Standard caveats", { size: 12, bold: true, lead: 2 });
+          (res.caveats || []).forEach(function (cv) { line("-  " + cv, { size: 9, indent: 8, color: "#5b6b80", lead: 2 }); });
+
+          // ── footer on every page ──
+          var stamp = ""; try { stamp = new Date().toLocaleString(); } catch (e) {}
+          var modeLabel = ui.mode === "media" ? "uploaded plan" : (ui.mode === "irregular" ? "drawn outline" : "rectangle");
+          for (var p = 0; p < pages.length; p++) {
+            pages[p].push("BT /F1 8 Tf " + rgb("#94a3b8") + " rg " + margin + " " + (margin - 22) +
+              " Td (Betson Game-Floor Planner wizard  -  input: " + esc(modeLabel) + (stamp ? "  -  " + esc(stamp) : "") +
+              "    |    page " + (p + 1) + " of " + pages.length + ") Tj ET");
+          }
+
+          return assemble();
+
+          // draws the room/usable/pillars into a fixed-height box at the flow cursor
+          function drawFloorPlan() {
+            var boxH = 250, boxW = W - 2 * margin;
+            need(boxH + 22);
+            line("Floor plan (not to scale)", { size: 12, bold: true, lead: 4 });
+            var top = y, bottom = y - boxH, left = margin;
+            add(rgb("#e3e8ef") + " RG 0.8 w " + left + " " + bottom.toFixed(1) + " " + boxW + " " + boxH + " re S");
+
+            var room = ui.polygon_ft.length >= 3 ? ui.polygon_ft
+              : (ui.width && ui.depth ? [[0, 0], [ui.width, 0], [ui.width, ui.depth], [0, ui.depth]] : null);
+            if (!room) {
+              add("BT /F1 10 Tf " + rgb("#94a3b8") + " rg " + (left + 12) + " " + (top - 20).toFixed(1) + " Td (No geometry captured yet.) Tj ET");
+              y = bottom - 8; return;
+            }
+            var usable = ui.usable_polygon_ft.length >= 3 ? ui.usable_polygon_ft : room;
+            var pillars = ui.noObstr ? [] : ui.pillars;
+
+            var pad = 16, bb = polyBBox(room);
+            var ew = Math.max(bb[2] - bb[0], 1), ed = Math.max(bb[3] - bb[1], 1);
+            var s = Math.min((boxW - 2 * pad) / ew, (boxH - 2 * pad) / ed);
+            var dw = ew * s, dh = ed * s;
+            var ox = left + (boxW - dw) / 2, oyTop = top - (boxH - dh) / 2;   // PDF y grows up → flip
+            function mp(ft) { return [ox + (ft[0] - bb[0]) * s, oyTop - (ft[1] - bb[1]) * s]; }
+            function path(pts) {
+              var d = "";
+              pts.forEach(function (pt, i) { var q = mp(pt); d += q[0].toFixed(2) + " " + q[1].toFixed(2) + (i === 0 ? " m " : " l "); });
+              return d + "h";
+            }
+            add(rgb("#e7f6ee") + " rg " + rgb("#1f9d55") + " RG 1.5 w " + path(usable) + " B");  // usable fill+stroke
+            add(rgb("#0b63c4") + " RG 2 w " + path(room) + " S");                                  // room outline
+            pillars.forEach(function (pl) {
+              var q = mp([pl.x_ft, pl.y_ft]), L = Math.max((pl.w_ft || 2) * s, 5);
+              add(rgb("#1a2230") + " rg " + (q[0] - L / 2).toFixed(1) + " " + (q[1] - L / 2).toFixed(1) + " " + L.toFixed(1) + " " + L.toFixed(1) + " re f");
+            });
+            y = bottom - 8;
+          }
+
+          // serializes objects → a valid PDF byte string → Blob (all ASCII, so 1 char = 1 byte)
+          function assemble() {
+            var objs = [];
+            objs[1] = "<< /Type /Catalog /Pages 2 0 R >>";
+            objs[3] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>";
+            objs[4] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>";
+            var kids = [], n = 5;
+            for (var p = 0; p < pages.length; p++) {
+              var stream = pages[p].join("\n");
+              var contentNum = n++, pageNum = n++;
+              objs[contentNum] = "<< /Length " + stream.length + " >>\nstream\n" + stream + "\nendstream";
+              objs[pageNum] = "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 " + W + " " + H + "]" +
+                " /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents " + contentNum + " 0 R >>";
+              kids.push(pageNum + " 0 R");
+            }
+            objs[2] = "<< /Type /Pages /Kids [" + kids.join(" ") + "] /Count " + pages.length + " >>";
+
+            var out = "%PDF-1.4\n", offsets = [], maxObj = n - 1;
+            for (var i = 1; i <= maxObj; i++) { offsets[i] = out.length; out += i + " 0 obj\n" + objs[i] + "\nendobj\n"; }
+            var xrefPos = out.length;
+            out += "xref\n0 " + (maxObj + 1) + "\n0000000000 65535 f \n";
+            for (var j = 1; j <= maxObj; j++) { var off = String(offsets[j]); while (off.length < 10) off = "0" + off; out += off + " 00000 n \n"; }
+            out += "trailer\n<< /Size " + (maxObj + 1) + " /Root 1 0 R >>\nstartxref\n" + xrefPos + "\n%%EOF";
+            return new Blob([out], { type: "application/pdf" });
+          }
         }
 
         function recomputeScale() {
