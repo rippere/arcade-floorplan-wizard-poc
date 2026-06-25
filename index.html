@@ -226,6 +226,7 @@
             // geometry (feet, room origin at top-left)
             polygon_ft: [],        // room outline (irregular + media)
             usable_polygon_ft: [], // highlighted usable region (all modes, optional)
+            carveUsable: false,    // UI-only: false = whole room is usable, true = plotting a custom area
             // media
             imageDataUrl: null,
             imgNatural: null,      // {w,h} px of the uploaded image
@@ -574,40 +575,51 @@
         // —— usable (all) — highlight the green usable region ——————————————————————————
         R.usable = {
           html: function () {
-            var hasUsable = ui.usable_polygon_ft.length >= 3;
-            return stepHead("Highlight the usable area", "Mark the area you want games in — the <strong>green box</strong>. Leave it as the whole room, or carve out entries, counters, walkways.") +
-              '<label class="check"><input type="checkbox" id="wholeRoom" ' + (hasUsable ? "" : "checked") + ' />' +
-              '<span class="ct">Use the whole room as usable<small>Uncheck to draw a smaller green area.</small></span></label>' +
-              '<div id="usableEditor" class="' + (hasUsable ? "" : "hidden") + '">' +
+            var carving = ui.carveUsable;
+            return stepHead("Highlight the usable area", "Mark the area you want games in — the <strong>green</strong> region. Leave it as the whole room, or carve out entries, counters, walkways.") +
+              '<label class="check"><input type="checkbox" id="wholeRoom" ' + (carving ? "" : "checked") + ' />' +
+              '<span class="ct">Use the whole room as usable<small>Uncheck to draw a smaller area — click each corner, just like tracing the room.</small></span></label>' +
+              // canvas is ALWAYS on this step so the uploaded plan stays in the backdrop
               '<div class="stagewrap"><svg class="stage" id="stage"></svg></div>' +
-              '<div class="toolbar"><button class="tool" id="undoPt">Undo point</button>' +
-              '<button class="tool" id="closePoly">Close shape</button>' +
-              '<button class="tool warn" id="clearPoly">Clear</button></div>' +
-              '<p class="calibnote" id="polyState"></p></div>' +
+              (carving
+                ? '<div class="toolbar"><button class="tool" id="undoPt">Undo point</button>' +
+                  '<button class="tool" id="closePoly">Close shape</button>' +
+                  '<button class="tool warn" id="clearPoly">Clear</button></div>' +
+                  '<p class="calibnote" id="polyState"></p>'
+                : '<p class="calibnote">The whole room counts as usable. Uncheck above to draw a smaller area.</p>') +
               '<div class="flags" id="flagbox"></div>' + nav();
           },
           wire: function () {
-            if (ui.usable_polygon_ft.length >= 3) wirePolygon("usable_polygon_ft", "#1f9d55", "#e7f6ee");
+            if (ui.carveUsable) {
+              // plot the usable area with the SAME movement as the room-outline step —
+              // click each corner, drag dots to adjust — over the same image backdrop.
+              wirePolygon("usable_polygon_ft", "#1f9d55", "#e7f6ee");
+            } else {
+              paintUsableWhole(); // read-only preview: image backdrop + whole room highlighted
+            }
             document.getElementById("wholeRoom").addEventListener("change", function (e) {
-              if (e.target.checked) ui.usable_polygon_ft = [];
-              else if (ui.usable_polygon_ft.length === 0) {
-                // seed a draggable starter box at ~85% of the room so there's something to edit
-                seedUsableBox();
-              }
+              // either way reset to empty: checked = whole room; unchecked = plot fresh (no seeded box)
+              ui.carveUsable = !e.target.checked;
+              ui.usable_polygon_ft = [];
               rerender();
             });
           },
           flags: ["usable_polygon_ft", "usable_exceeds_room", "area"],
         };
-        function seedUsableBox() {
-          var ext = roomExtentFt();
-          var mx = ext.w * 0.08, my = ext.d * 0.08;
-          ui.usable_polygon_ft = [
-            [+(mx).toFixed(1), +(my).toFixed(1)],
-            [+(ext.w - mx).toFixed(1), +(my).toFixed(1)],
-            [+(ext.w - mx).toFixed(1), +(ext.d - my).toFixed(1)],
-            [+(mx).toFixed(1), +(ext.d - my).toFixed(1)],
-          ];
+        // whole-room view: keeps the uploaded plan (media) in the backdrop with the entire
+        // room highlighted as usable, so the image stays visible on this step too.
+        function paintUsableWhole() {
+          var svg = document.getElementById("stage"); if (!svg) return;
+          var v = makeStage(svg, { image: ui.mode === "media" && !!ui.pxPerFt });
+          var parts = [v.bg];
+          var room = ui.polygon_ft.length >= 3 ? ui.polygon_ft
+            : (ui.mode === "rectangle" && ui.width && ui.depth ? [[0,0],[ui.width,0],[ui.width,ui.depth],[0,ui.depth]] : null);
+          if (room) {
+            parts.push('<path d="' + polyToPath(v, room) + '" fill="#e7f6ee" fill-opacity="0.55" stroke="#1f9d55" stroke-width="2.5" stroke-linejoin="round" />');
+            var mid = v.toPx(polyCentroid(room));
+            parts.push('<text x="' + mid[0] + '" y="' + mid[1] + '" text-anchor="middle" font-size="13" font-weight="700" fill="#1f9d55">' + Math.round(polyArea(room)).toLocaleString() + ' sq ft</text>');
+          }
+          v.svg.innerHTML = parts.join("");
         }
 
         // —— door (all) ————————————————————————————————————————————————————————————————
