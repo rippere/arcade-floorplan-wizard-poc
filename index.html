@@ -85,6 +85,7 @@
       .pill.high { background: var(--green); color: #fff; }
       .pill.medium { background: var(--amber); color: #fff; }
       .pill.low { background: var(--red); color: #fff; }
+      .pill.neutral { background: rgba(255, 255, 255, 0.14); color: #cbd5e1; }
 
       /* progress */
       .steps { display: flex; gap: 6px; margin-bottom: 14px; }
@@ -337,16 +338,19 @@
           var mSqft = document.getElementById("mSqft");
           var mPill = document.getElementById("mPill");
           if (res.game_count !== null) {
-            mCount.firstChild.nodeValue = "≈ " + res.game_count + " ";
-            mSub.textContent = "games (rough)";
+            mCount.firstChild.nodeValue = "≈ " + res.game_count.toLocaleString() + " ";
+            mSub.textContent = res.game_count === 1 ? "game (rough)" : "games (rough)";
             mSqft.textContent = Math.round(res.usable_sqft).toLocaleString() + " sq ft usable";
+            mPill.className = "pill " + res.confidence;
+            mPill.textContent = res.confidence;
           } else {
             mCount.firstChild.nodeValue = "— ";
             mSub.textContent = "games";
             mSqft.textContent = ui.mode ? "keep going" : "choose how to start";
+            // neutral until there's anything to grade — no alarming red LOW on first load
+            mPill.className = "pill neutral";
+            mPill.textContent = ui.mode ? "in progress" : "not started";
           }
-          mPill.className = "pill " + res.confidence;
-          mPill.textContent = res.confidence;
         }
         function flagHtml(i) {
           var ic = i.severity === "blocking" ? "⛔" : "⚠";
@@ -477,8 +481,8 @@
           },
           wire: function () {
             var f = document.getElementById("file");
-            document.getElementById("dropbox").addEventListener("click", function () { f.click(); });
-            f.addEventListener("click", function (e) { e.stopPropagation(); });
+            // the <input type=file> lives inside the <label id=dropbox>, which already
+            // opens the picker natively on click — an explicit f.click() double-opened it.
             f.addEventListener("change", function (e) {
               var file = e.target.files && e.target.files[0];
               if (!file) return;
@@ -561,7 +565,9 @@
               '<div class="flags" id="flagbox"></div>' + nav(ui.polygon_ft.length >= 3);
           },
           wire: function () { wirePolygon("polygon_ft", "#0b63c4", "#eef6ff"); },
-          flags: ["polygon_ft", "area", "degenerate_polygon", "poly_rect_mismatch"],
+          // omit "area": the no_area flag is premature while you're still drawing the
+          // outline (this step IS where you supply it; Next is gated until 3+ points).
+          flags: ["polygon_ft", "degenerate_polygon", "poly_rect_mismatch"],
         };
 
         // —— usable (all) — highlight the green usable region ——————————————————————————
@@ -668,7 +674,7 @@
               '<div class="review-line"><span class="k">Usable area</span><span class="v">' +
                 (res.usable_sqft !== null ? Math.round(res.usable_sqft).toLocaleString() + " sq ft" : "—") + "</span></div>" +
               '<div class="review-line"><span class="k">Estimated games (÷70)</span><span class="v">' +
-                (res.game_count !== null ? "≈ " + res.game_count + " games" : "—") + "</span></div>" +
+                (res.game_count !== null ? "≈ " + res.game_count.toLocaleString() + (res.game_count === 1 ? " game" : " games") : "—") + "</span></div>" +
               '<div class="review-line"><span class="k">Confidence</span><span class="v">' + res.confidence.toUpperCase() + "</span></div>" +
               routeBox(res) +
               '<div class="sectit">Why ' + res.confidence.toUpperCase() + "</div><ul class='reasons'>" +
@@ -783,7 +789,7 @@
               if (Math.hypot(pt[0]-first[0], pt[1]-first[1]) < 14) { rerenderLive(); return; }
             }
             pts.push([Math.round(ft[0]*10)/10, Math.round(ft[1]*10)/10]);
-            paintPoly(); rerenderMirrorOnly();
+            paintPoly(); rerenderLive(); // refresh flags too, so stale errors clear as you draw
           };
           svg.onpointerdown = function (evt) {
             var t = evt.target;
@@ -910,7 +916,15 @@
           var res = compute();
           var html = flagsForFields(res, R[id].flags || []);
           if (!html && id === "size" && res.usable_sqft !== null) {
-            html = '<div class="ok-note">✓ ' + Math.round(res.usable_sqft).toLocaleString() + " sq ft → about " + res.game_count + " games. Looks consistent.</div>";
+            var gc = res.game_count, gw = gc === 1 ? " game" : " games";
+            if (res.usable_sqft > 60000) {
+              // UI-only sanity nudge — far beyond a single room, likely a units typo.
+              html = '<div class="flag warning"><span class="ic">⚠</span><span class="fx"><strong>' +
+                Math.round(res.usable_sqft).toLocaleString() + " sq ft → about " + gc.toLocaleString() + gw +
+                " — unusually large for one room.</strong><div class=\"hint\">Double-check the numbers — feet, not inches?</div></span></div>";
+            } else {
+              html = '<div class="ok-note">✓ ' + Math.round(res.usable_sqft).toLocaleString() + " sq ft → about " + gc.toLocaleString() + gw + ". Looks consistent.</div>";
+            }
           }
           box.innerHTML = html;
         }
