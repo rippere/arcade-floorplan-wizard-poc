@@ -543,7 +543,7 @@
               }
               v.svg.innerHTML = parts.join("");
             }
-            function dot(p) { return '<circle cx="' + p[0] + '" cy="' + p[1] + '" r="6" fill="#0b63c4" stroke="#fff" stroke-width="2" />'; }
+            function dot(p) { return '<circle cx="' + p[0] + '" cy="' + p[1] + '" r="3.5" fill="#0b63c4" stroke="#fff" stroke-width="1.5" />'; }
             function updateCalibState() {
               var el = document.getElementById("calibState"); if (!el) return;
               if (ui.pxPerFt) el.innerHTML = "✓ Scale set. Re-click the image to redo it.";
@@ -804,8 +804,19 @@
             parts.push('<path d="' + polyToPath(v, pts) + '" fill="' + (pts.length >= 3 ? fill : "none") + '" fill-opacity="0.6" stroke="' + stroke + '" stroke-width="2.5" stroke-linejoin="round" />');
             pts.forEach(function (p, i) {
               var q = v.toPx(p);
-              parts.push('<circle class="vtx" data-idx="' + i + '" cx="' + q[0].toFixed(1) + '" cy="' + q[1].toFixed(1) + '" r="7" fill="#fff" stroke="' + stroke + '" stroke-width="2.5" />');
+              // small visible node for precise placement + a larger invisible halo so it stays grabbable
+              parts.push('<circle class="vtx" data-idx="' + i + '" cx="' + q[0].toFixed(1) + '" cy="' + q[1].toFixed(1) + '" r="12" fill="transparent" />');
+              parts.push('<circle cx="' + q[0].toFixed(1) + '" cy="' + q[1].toFixed(1) + '" r="4" fill="#fff" stroke="' + stroke + '" stroke-width="2" pointer-events="none" />');
             });
+            // live per-edge length labels (feet) — update as you place/drag and persist after
+            for (var ei = 0; ei < pts.length; ei++) {
+              if (ei === pts.length - 1 && pts.length < 3) break;   // open polyline: no closing edge
+              var ea = pts[ei], eb = pts[(ei + 1) % pts.length];
+              var segFt = Math.hypot(eb[0] - ea[0], eb[1] - ea[1]);
+              if (segFt < 0.1) continue;
+              var ma = v.toPx(ea), mb = v.toPx(eb), tx = (ma[0] + mb[0]) / 2, ty = (ma[1] + mb[1]) / 2;
+              parts.push('<text x="' + tx.toFixed(1) + '" y="' + (ty - 4).toFixed(1) + '" text-anchor="middle" font-size="10" font-weight="700" paint-order="stroke" stroke="#fff" stroke-width="3" fill="' + stroke + '">' + segFt.toFixed(1) + ' ft</text>');
+            }
             if (pts.length >= 3) {
               var mid = v.toPx(polyCentroid(pts));
               parts.push('<text x="' + mid[0] + '" y="' + mid[1] + '" text-anchor="middle" font-size="13" font-weight="700" fill="' + stroke + '">' + Math.round(polyArea(pts)).toLocaleString() + ' sq ft</text>');
@@ -1081,8 +1092,8 @@
             }
             // uploaded plan as the backdrop: image XObject /Im0, lower-left at (ox, oyTop - dh)
             if (plan) add("q " + dw.toFixed(2) + " 0 0 " + dh.toFixed(2) + " " + ox.toFixed(2) + " " + (oyTop - dh).toFixed(2) + " cm /Im0 Do Q");
-            // over a photo the usable is stroked only (a fill would hide the plan); else fill+stroke
-            if (usable) add(rgb("#e7f6ee") + " rg " + rgb("#1f9d55") + " RG 2.5 w " + path(usable) + (plan ? " S" : " B"));
+            // translucent green usable: fill at 0.30 alpha (/GS1) + opaque stroke, so the plan shows through
+            if (usable) add("q /GS1 gs " + rgb("#1f9d55") + " rg " + rgb("#1f9d55") + " RG 2.5 w " + path(usable) + " B Q");
             if (room) add(rgb("#0b63c4") + " RG 2 w " + path(room) + " S");
             pillars.forEach(function (pl) {
               var q = mp([pl.x_ft, pl.y_ft]), L = Math.max((pl.w_ft || 2) * s, 5);
@@ -1116,11 +1127,12 @@
               raw(plan.bytes); put("\nendstream"); objEnd();
             }
             var xobj = plan ? " /XObject << /Im0 5 0 R >>" : "";
+            var gstate = " /ExtGState << /GS1 << /ca 0.30 /CA 1 >> >>";   // translucent fill for the usable overlay
             for (var q = 0; q < pages.length; q++) {
               var sbytes = enc.encode(pages[q].join("\n"));
               objStart(contentNums[q]); put("<< /Length " + sbytes.length + " >>\nstream\n"); raw(sbytes); put("\nendstream"); objEnd();
               objStart(pageNums[q]); put("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 " + W + " " + H + "]" +
-                " /Resources << /Font << /F1 3 0 R /F2 4 0 R >>" + xobj + " >> /Contents " + contentNums[q] + " 0 R >>"); objEnd();
+                " /Resources << /Font << /F1 3 0 R /F2 4 0 R >>" + xobj + gstate + " >> /Contents " + contentNums[q] + " 0 R >>"); objEnd();
             }
             var xrefPos = len;
             put("xref\n0 " + (maxObj + 1) + "\n0000000000 65535 f \n");
