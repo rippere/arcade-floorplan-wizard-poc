@@ -234,8 +234,12 @@
             calib: null,           // {a:[px,px], b:[px,px], lengthFt} in viewBox space
             // shared facts
             door: null, doorInside: false, doorUnknown: false,
+            doorPos: null,         // [x,y] ft on the perimeter where the door is placed
+            doorOpensIn: false,    // true = swings into the room → deducts a clearance from usable
             ceiling: null, ropes: false,
             noObstr: false, pillars: [],
+            obstructions: [],      // committed free-draw obstruction polygons (each subtracts from usable)
+            obstrDraft: [],        // the obstruction polygon currently being plotted
           };
         }
         var ui = freshState();
@@ -269,9 +273,9 @@
         function buildRoom() {
           var doors = [];
           if (!ui.doorUnknown && ui.door !== null) {
-            doors = [{ width_in: ui.door, measured_inside: ui.doorInside, location: null }];
+            doors = [{ width_in: ui.door, measured_inside: ui.doorInside, location: ui.doorPos, opens_inward: ui.doorOpensIn }];
           } else if (ui.doorUnknown) {
-            doors = [{ width_in: null }]; // → assumed 36", flagged
+            doors = [{ width_in: null, location: ui.doorPos, opens_inward: ui.doorOpensIn }]; // → assumed 36", flagged
           }
           var poly = ui.polygon_ft.length >= 3 ? ui.polygon_ft.map(function (p) { return [p[0], p[1]]; }) : null;
           var usable = ui.usable_polygon_ft.length >= 3 ? ui.usable_polygon_ft.map(function (p) { return [p[0], p[1]]; }) : null;
@@ -281,7 +285,10 @@
             shape: ui.mode === "rectangle" ? "rectangular" : "irregular",
             ceiling_height_ft: ui.ceiling,
             doors: doors,
-            pillars: ui.noObstr ? [] : ui.pillars.slice(),
+            pillars: ui.noObstr ? [] : ui.obstructions.filter(function (o) { return o.length >= 3; }).map(function (o) {
+              var c = polyCentroid(o), b = polyBBox(o);
+              return { x_ft: +c[0].toFixed(1), y_ft: +c[1].toFixed(1), w_ft: +(b[2] - b[0]).toFixed(1), d_ft: +(b[3] - b[1]).toFixed(1) };
+            }),
             has_ropes_course: ui.ropes,
             notes: [],
           };
@@ -332,6 +339,54 @@
           return { w: 40, d: 25 }; // neutral default canvas
         }
 
+        // ── door geometry + obstruction/swing deductions (UI-side; engine stays pure) ──
+        function roomPoly() {
+          if (ui.polygon_ft.length >= 3) return ui.polygon_ft;
+          if (ui.width && ui.depth) return [[0, 0], [ui.width, 0], [ui.width, ui.depth], [0, ui.depth]];
+          return null;
+        }
+        function projSeg(p, a, b) {
+          var dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy;
+          if (l2 === 0) return a.slice();
+          var t = ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2; t = Math.max(0, Math.min(1, t));
+          return [a[0] + t * dx, a[1] + t * dy];
+        }
+        function nearestOnPoly(p, poly) {
+          var best = null, bd = Infinity;
+          for (var i = 0; i < poly.length; i++) {
+            var a = poly[i], b = poly[(i + 1) % poly.length], q = projSeg(p, a, b);
+            var d = Math.hypot(p[0] - q[0], p[1] - q[1]);
+            if (d < bd) { bd = d; best = { point: q, a: a, b: b }; }
+          }
+          return best;
+        }
+        function doorWidthFt() {
+          var inch = ui.doorUnknown ? 36 : ui.door;
+          return inch && inch > 0 ? inch / 12 : 0;
+        }
+        // quarter-circle swing-clearance polygon (feet) when the door is placed & opens inward
+        function doorSwingPoly() {
+          if (!ui.doorPos || !ui.doorOpensIn) return null;
+          var w = doorWidthFt(); if (!w) return null;
+          var room = roomPoly(); if (!room) return null;
+          var near = nearestOnPoly(ui.doorPos, room);
+          var dx = near.b[0] - near.a[0], dy = near.b[1] - near.a[1], L = Math.hypot(dx, dy) || 1;
+          var wu = [dx / L, dy / L], c = polyCentroid(room), n = [-wu[1], wu[0]];
+          if (n[0] * (c[0] - near.point[0]) + n[1] * (c[1] - near.point[1]) < 0) n = [-n[0], -n[1]]; // point inward
+          var hinge = [near.point[0] - wu[0] * w / 2, near.point[1] - wu[1] * w / 2];
+          var a0 = Math.atan2(wu[1], wu[0]), a1 = Math.atan2(n[1], n[0]);
+          var d = a1 - a0; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI;
+          var poly = [hinge.slice()];
+          for (var i = 0; i <= 10; i++) { var ang = a0 + d * i / 10; poly.push([hinge[0] + w * Math.cos(ang), hinge[1] + w * Math.sin(ang)]); }
+          return poly;
+        }
+        function obstructionArea() {
+          return (ui.noObstr ? [] : ui.obstructions).reduce(function (s, ob) { return s + (ob.length >= 3 ? polyArea(ob) : 0); }, 0);
+        }
+        function deductionsFt2() { var sw = doorSwingPoly(); return obstructionArea() + (sw ? polyArea(sw) : 0); }
+        function netUsableSqft(res) { return res.usable_sqft == null ? null : Math.max(0, res.usable_sqft - deductionsFt2()); }
+        function netGames(res) { var n = netUsableSqft(res); return n == null ? null : Math.floor(n / 70); }
+
         // ── the live mirror + the engine result ──────────────────────────────────────
         function compute() { return M.buildUsable(buildRoom()); }
         function renderMirror(res) {
@@ -340,9 +395,10 @@
           var mSqft = document.getElementById("mSqft");
           var mPill = document.getElementById("mPill");
           if (res.game_count !== null) {
-            mCount.firstChild.nodeValue = "≈ " + res.game_count.toLocaleString() + " ";
-            mSub.textContent = res.game_count === 1 ? "game (rough)" : "games (rough)";
-            mSqft.textContent = Math.round(res.usable_sqft).toLocaleString() + " sq ft usable";
+            var ng = netGames(res), nu = netUsableSqft(res);
+            mCount.firstChild.nodeValue = "≈ " + ng.toLocaleString() + " ";
+            mSub.textContent = ng === 1 ? "game (rough)" : "games (rough)";
+            mSqft.textContent = Math.round(nu).toLocaleString() + " sq ft usable";
             mPill.className = "pill " + res.confidence;
             mPill.textContent = res.confidence;
           } else {
@@ -632,6 +688,11 @@
               '<span class="ct">I measured the <strong>inside of the frame</strong>, door open<small>Not the slab, not the trim. Double doors: both open.</small></span></label>' +
               '<label class="check"><input type="checkbox" id="doorUnknown" ' + (ui.doorUnknown ? "checked" : "") + ' />' +
               '<span class="ct">I don\'t know it yet<small>We\'ll assume a standard 36" door and flag it.</small></span></label>' +
+              '<div class="sectit">Where is the door?</div>' +
+              '<p class="hinttext">Tap a wall to place the door. If it opens <strong>into the room</strong>, its swing is kept clear of games.</p>' +
+              '<div class="stagewrap"><svg class="stage" id="stage"></svg></div>' +
+              '<label class="check"><input type="checkbox" id="doorOpensIn" ' + (ui.doorOpensIn ? "checked" : "") + ' />' +
+              '<span class="ct">Door opens <strong>into</strong> the room<small>Inward swing reduces usable space; outward doesn\'t.</small></span></label>' +
               '<div class="flags" id="flagbox"></div>' + nav();
           },
           wire: function () {
@@ -639,11 +700,40 @@
             document.getElementById("doorUnknown").addEventListener("change", function (e) {
               ui.doorUnknown = e.target.checked;
               var d = document.getElementById("door"); if (d) d.disabled = e.target.checked;
-              rerenderFlags();
+              wireDoorPlace(); rerenderFlags();
             });
+            var di = document.getElementById("door"); if (di) di.addEventListener("input", function () { wireDoorPlace(); });
+            bindCheck("doorOpensIn", "doorOpensIn", function () { wireDoorPlace(); rerenderLive(); });
+            wireDoorPlace();
           },
           flags: ["doors"],
         };
+        // door placement: tap a wall to set ui.doorPos (snapped to the perimeter); shows the
+        // inward swing arc that's deducted from usable when "opens into the room" is on.
+        function wireDoorPlace() {
+          var svg = document.getElementById("stage"); if (!svg) return;
+          paint();
+          function curView() { return makeStage(svg, { image: ui.mode === "media" && !!ui.pxPerFt }); }
+          function paint() {
+            var v = curView(), parts = [v.bg], room = roomPoly();
+            var roomFill = v.image ? "none" : "#fbfdff";
+            if (room) parts.push('<path d="' + polyToPath(v, room) + '" fill="' + roomFill + '" stroke="#0b63c4" stroke-width="2" />');
+            if (ui.doorPos && room) {
+              var sw = doorSwingPoly();
+              if (sw) parts.push('<path d="' + polyToPath(v, sw) + '" fill="#0b63c4" fill-opacity="0.18" stroke="#0b63c4" stroke-width="1.5" stroke-dasharray="4 3" />');
+              var dq = v.toPx(ui.doorPos);
+              parts.push('<circle cx="' + dq[0].toFixed(1) + '" cy="' + dq[1].toFixed(1) + '" r="6" fill="#0b63c4" stroke="#fff" stroke-width="2" />');
+            }
+            v.svg.innerHTML = parts.join("");
+          }
+          svg.onclick = function (evt) {
+            var room = roomPoly(); if (!room) return;
+            var ft = curView().toFt(evt.clientX, evt.clientY); if (!ft) return;
+            var near = nearestOnPoly(ft, room);
+            ui.doorPos = [Math.round(near.point[0] * 10) / 10, Math.round(near.point[1] * 10) / 10];
+            paint(); rerenderLive();
+          };
+        }
 
         // —— ceiling (all) ——————————————————————————————————————————————————————————————
         R.ceiling = {
@@ -661,23 +751,42 @@
         // —— pillars (all) ——————————————————————————————————————————————————————————————
         R.pillars = {
           html: function () {
-            return stepHead("Pillars & obstructions", "Anything standing on the floor means less real usable space — <strong>support pillars, columns, low beams, panels.</strong> We log them so your layout routes around them. Tap the floor to drop one.") +
+            return stepHead("Obstructions", "Anything standing on the floor — <strong>columns, counters, low beams, panels</strong> — means less usable space. <strong>Draw around each one</strong> (click each corner, like the room) and we subtract it. Add as many as you need.") +
               '<label class="check"><input type="checkbox" id="noObstr" ' + (ui.noObstr ? "checked" : "") + ' />' +
               '<span class="ct">My room is clear — no interior obstructions</span></label>' +
               '<div id="canvasArea" class="' + (ui.noObstr ? "hidden" : "") + '">' +
               '<div class="stagewrap"><svg class="stage" id="stage"></svg></div>' +
-              '<p class="hinttext">Tap inside the room to add a pillar (≈2×2 ft). Tap a pillar to remove it.</p>' +
-              '<div class="pillarlist" id="pillarList"></div></div>' +
+              '<div class="toolbar"><button class="tool" id="undoPt">Undo point</button>' +
+              '<button class="tool" id="addObstr">+ Add this obstruction</button>' +
+              '<button class="tool warn" id="clearPoly">Clear</button></div>' +
+              '<p class="calibnote" id="polyState"></p>' +
+              '<div class="pillarlist" id="obstrList"></div></div>' +
               '<div class="flags" id="flagbox"></div>' + nav();
           },
           wire: function () {
             bindCheck("noObstr", "noObstr", function () {
               document.getElementById("canvasArea").classList.toggle("hidden", ui.noObstr); rerender();
             });
-            if (!ui.noObstr) wirePillars();
+            if (!ui.noObstr) {
+              wirePolygon("obstrDraft", "#c0392b", "#fdecea");   // same plotting movement as the room outline
+              var add = document.getElementById("addObstr");
+              if (add) add.onclick = function () {
+                if (ui.obstrDraft.length >= 3) { ui.obstructions.push(ui.obstrDraft.slice()); ui.obstrDraft = []; rerender(); }
+              };
+              renderObstrList();
+            }
           },
           flags: ["pillars"],
         };
+        function renderObstrList() {
+          var list = document.getElementById("obstrList"); if (!list) return;
+          list.innerHTML = ui.obstructions.map(function (o, i) {
+            return '<span class="pillarchip">Obstruction ' + (i + 1) + " · " + Math.round(polyArea(o)).toLocaleString() + " sq ft<button type=\"button\" data-rmo=\"" + i + "\">✕</button></span>";
+          }).join("");
+          list.querySelectorAll("[data-rmo]").forEach(function (b) {
+            b.onclick = function () { ui.obstructions.splice(Number(b.dataset.rmo), 1); rerender(); };
+          });
+        }
 
         // —— review (all) ———————————————————————————————————————————————————————————————
         R.review = {
@@ -685,9 +794,10 @@
             return stepHead("Your usable space", "A draft estimate for review — not a code-compliance certification.") +
               '<div class="stagewrap"><svg class="stage" id="stage"></svg></div>' +
               '<div class="review-line"><span class="k">Usable area</span><span class="v">' +
-                (res.usable_sqft !== null ? Math.round(res.usable_sqft).toLocaleString() + " sq ft" : "—") + "</span></div>" +
+                (res.usable_sqft !== null ? Math.round(netUsableSqft(res)).toLocaleString() + " sq ft" : "—") + "</span></div>" +
+              (deductionsFt2() > 0 ? '<div class="review-line"><span class="k">— less obstructions / door swing</span><span class="v">−' + Math.round(deductionsFt2()).toLocaleString() + " sq ft</span></div>" : "") +
               '<div class="review-line"><span class="k">Estimated games (÷70)</span><span class="v">' +
-                (res.game_count !== null ? "≈ " + res.game_count.toLocaleString() + (res.game_count === 1 ? " game" : " games") : "—") + "</span></div>" +
+                (res.game_count !== null ? "≈ " + netGames(res).toLocaleString() + (netGames(res) === 1 ? " game" : " games") : "—") + "</span></div>" +
               '<div class="review-line"><span class="k">Confidence</span><span class="v">' + res.confidence.toUpperCase() + "</span></div>" +
               routeBox(res) +
               '<div class="sectit">Why ' + res.confidence.toUpperCase() + "</div><ul class='reasons'>" +
@@ -793,12 +903,16 @@
             var v = curView();
             var parts = [v.bg];
             // faint room outline beneath the usable editor for context
-            if (key === "usable_polygon_ft") {
-              // context outline only — keep the fill transparent so an uploaded plan
-              // image (media mode) shows through instead of being hidden by white.
-              if (ui.polygon_ft.length >= 3) parts.push('<path d="' + polyToPath(v, ui.polygon_ft) + '" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="5 4" />');
-              else if (ui.mode === "rectangle" && ui.width && ui.depth)
-                parts.push('<path d="' + polyToPath(v, [[0,0],[ui.width,0],[ui.width,ui.depth],[0,ui.depth]]) + '" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="5 4" />');
+            if (key === "usable_polygon_ft" || key === "obstrDraft") {
+              // dashed room-context outline (transparent fill so an uploaded plan shows through)
+              var ctx = roomPoly();
+              if (ctx) parts.push('<path d="' + polyToPath(v, ctx) + '" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="5 4" />');
+            }
+            if (key === "obstrDraft") {
+              // already-committed obstructions, shown beneath the one being drawn
+              ui.obstructions.forEach(function (ob) {
+                if (ob.length >= 3) parts.push('<path d="' + polyToPath(v, ob) + '" fill="#c0392b" fill-opacity="0.30" stroke="#c0392b" stroke-width="2" />');
+              });
             }
             var pts = ui[key];
             parts.push('<path d="' + polyToPath(v, pts) + '" fill="' + (pts.length >= 3 ? fill : "none") + '" fill-opacity="0.6" stroke="' + stroke + '" stroke-width="2.5" stroke-linejoin="round" />');
@@ -909,10 +1023,12 @@
           if (room) parts.push('<path d="' + polyToPath(view, room) + '" fill="' + roomFill + '" stroke="#0b63c4" stroke-width="2" />');
           var usable = ui.usable_polygon_ft.length >= 3 ? ui.usable_polygon_ft : room;
           if (usable) parts.push('<path d="' + polyToPath(view, usable) + '" fill="#e7f6ee" fill-opacity="0.65" stroke="#1f9d55" stroke-width="2.5" />');
-          (ui.noObstr ? [] : ui.pillars).forEach(function (p) {
-            var q = view.toPx([p.x_ft, p.y_ft]); var pw = Math.max((p.w_ft||2)*(view.scale||6), 8);
-            parts.push('<rect x="' + (q[0]-pw/2) + '" y="' + (q[1]-pw/2) + '" width="' + pw + '" height="' + pw + '" rx="2" fill="#1a2230" opacity="0.82" />');
+          (ui.noObstr ? [] : ui.obstructions).forEach(function (ob) {
+            if (ob.length >= 3) parts.push('<path d="' + polyToPath(view, ob) + '" fill="#c0392b" fill-opacity="0.32" stroke="#c0392b" stroke-width="2" />');
           });
+          var rsw = doorSwingPoly();
+          if (rsw) parts.push('<path d="' + polyToPath(view, rsw) + '" fill="#0b63c4" fill-opacity="0.18" stroke="#0b63c4" stroke-width="1.5" stroke-dasharray="4 3" />');
+          if (ui.doorPos) { var dq = view.toPx(ui.doorPos); parts.push('<circle cx="' + dq[0].toFixed(1) + '" cy="' + dq[1].toFixed(1) + '" r="5" fill="#0b63c4" stroke="#fff" stroke-width="2" />'); }
           view.svg.innerHTML = parts.join("");
         }
 
@@ -997,8 +1113,8 @@
 
           // ── metric dashboard (three columns) ──
           var cols = [
-            { label: "Usable area", value: (res.usable_sqft !== null ? Math.round(res.usable_sqft).toLocaleString() + " sq ft" : "N/A") },
-            { label: "Estimated games (per 70 sq ft)", value: (res.game_count !== null ? "~ " + res.game_count.toLocaleString() : "N/A") },
+            { label: "Usable area (net)", value: (res.usable_sqft !== null ? Math.round(netUsableSqft(res)).toLocaleString() + " sq ft" : "N/A") },
+            { label: "Estimated games (per 70 sq ft)", value: (res.game_count !== null ? "~ " + netGames(res).toLocaleString() : "N/A") },
             { label: "Confidence", value: String(res.confidence || "").toUpperCase() },
           ];
           need(46);
@@ -1065,7 +1181,8 @@
               y = bottom - 8; return;
             }
             var usable = ui.usable_polygon_ft.length >= 3 ? ui.usable_polygon_ft : room;
-            var pillars = ui.noObstr ? [] : ui.pillars;
+            var obstr = ui.noObstr ? [] : ui.obstructions.filter(function (o) { return o.length >= 3; });
+            var swing = doorSwingPoly();
             var pad = 16, bb, s;
 
             // With an uploaded plan, fit the IMAGE's foot-extent to the box so the whole photo
@@ -1095,10 +1212,10 @@
             // translucent green usable: fill at 0.30 alpha (/GS1) + opaque stroke, so the plan shows through
             if (usable) add("q /GS1 gs " + rgb("#1f9d55") + " rg " + rgb("#1f9d55") + " RG 2.5 w " + path(usable) + " B Q");
             if (room) add(rgb("#0b63c4") + " RG 2 w " + path(room) + " S");
-            pillars.forEach(function (pl) {
-              var q = mp([pl.x_ft, pl.y_ft]), L = Math.max((pl.w_ft || 2) * s, 5);
-              add(rgb("#1a2230") + " rg " + (q[0] - L / 2).toFixed(1) + " " + (q[1] - L / 2).toFixed(1) + " " + L.toFixed(1) + " " + L.toFixed(1) + " re f");
-            });
+            // obstructions (translucent red) + inward door swing (translucent blue) + door marker
+            obstr.forEach(function (ob) { add("q /GS1 gs " + rgb("#c0392b") + " rg " + rgb("#c0392b") + " RG 1.5 w " + path(ob) + " B Q"); });
+            if (swing) add("q /GS1 gs " + rgb("#0b63c4") + " rg " + rgb("#0b63c4") + " RG 1 w " + path(swing) + " B Q");
+            if (ui.doorPos) { var dpq = mp(ui.doorPos); add(rgb("#0b63c4") + " rg " + (dpq[0] - 2).toFixed(1) + " " + (dpq[1] - 2).toFixed(1) + " 4 4 re f"); }
             y = bottom - 8;
           }
 
