@@ -298,7 +298,7 @@
             shape: ui.mode === "rectangle" ? "rectangular" : "irregular",
             ceiling_height_ft: ui.ceiling,
             doors: doors,
-            pillars: ui.noObstr ? [] : ui.obstructions.filter(function (o) { return o.length >= 3; }).map(function (o) {
+            pillars: effectiveObstructions().filter(function (o) { return o.length >= 3; }).map(function (o) {
               var c = polyCentroid(o), b = polyBBox(o);
               return { x_ft: +c[0].toFixed(1), y_ft: +c[1].toFixed(1), w_ft: +(b[2] - b[0]).toFixed(1), d_ft: +(b[3] - b[1]).toFixed(1) };
             }),
@@ -392,6 +392,16 @@
           var poly = [hinge.slice()];
           for (var i = 0; i <= 10; i++) { var ang = a0 + d * i / 10; poly.push([hinge[0] + w * Math.cos(ang), hinge[1] + w * Math.sin(ang)]); }
           return poly;
+        }
+        // The obstructions that COUNT: committed ones plus the boundary currently being
+        // drawn (≥3 pts). So a drawn obstruction is subtracted even before "+ Add this
+        // obstruction" is clicked, and is never silently dropped on Next — "+ Add" just
+        // lets you start ANOTHER one. Fixes drawn-but-not-added obstructions being ignored.
+        function effectiveObstructions() {
+          if (ui.noObstr) return [];
+          var list = ui.obstructions.slice();
+          if (ui.obstrDraft && ui.obstrDraft.length >= 3) list.push(ui.obstrDraft);
+          return list;
         }
         // Door swing is the ONLY UI-side deduction left — the engine doesn't model the
         // inward-swing geometry. Obstructions/pillars are now subtracted by the engine
@@ -1066,7 +1076,7 @@
           if (room) parts.push('<path d="' + polyToPath(view, room) + '" fill="' + roomFill + '" stroke="#0b63c4" stroke-width="2" />');
           var usable = ui.usable_polygon_ft.length >= 3 ? ui.usable_polygon_ft : room;
           if (usable) parts.push('<path d="' + polyToPath(view, usable) + '" fill="#e7f6ee" fill-opacity="0.65" stroke="#1f9d55" stroke-width="2.5" />');
-          (ui.noObstr ? [] : ui.obstructions).forEach(function (ob) {
+          effectiveObstructions().forEach(function (ob) {
             if (ob.length >= 3) parts.push('<path d="' + polyToPath(view, ob) + '" fill="#c0392b" fill-opacity="0.32" stroke="#c0392b" stroke-width="2" />');
           });
           var rsw = doorSwingPoly();
@@ -1224,7 +1234,7 @@
               y = bottom - 8; return;
             }
             var usable = ui.usable_polygon_ft.length >= 3 ? ui.usable_polygon_ft : room;
-            var obstr = ui.noObstr ? [] : ui.obstructions.filter(function (o) { return o.length >= 3; });
+            var obstr = effectiveObstructions().filter(function (o) { return o.length >= 3; });
             var swing = doorSwingPoly();
             var pad = 16, bb, s;
 
