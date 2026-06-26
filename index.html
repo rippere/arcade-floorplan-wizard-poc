@@ -87,6 +87,9 @@
       .pill.medium { background: var(--amber); color: #fff; }
       .pill.low { background: var(--red); color: #fff; }
       .pill.neutral { background: rgba(255, 255, 255, 0.14); color: #cbd5e1; }
+      .unittoggle { display: inline-flex; border: 1px solid rgba(255, 255, 255, 0.28); border-radius: 999px; overflow: hidden; }
+      .unittoggle button { font: inherit; font-size: 0.78rem; font-weight: 700; padding: 5px 11px; border: 0; background: transparent; color: #cbd5e1; cursor: pointer; }
+      .unittoggle button.sel { background: #fff; color: var(--ink); }
 
       /* progress */
       .steps { display: flex; gap: 6px; margin-bottom: 14px; }
@@ -198,6 +201,9 @@
           <div class="count" id="mCount">—<small id="mCountSub">games (rough)</small></div>
         </div>
         <div class="spacer"></div>
+        <div class="unittoggle" id="unitToggle" title="Measurement units">
+          <button type="button" data-unit="ft">ft</button><button type="button" data-unit="in">in</button>
+        </div>
         <div style="text-align:right">
           <div class="sqft" id="mSqft">choose how to start</div>
           <div style="margin-top:6px"><span class="pill low" id="mPill">incomplete</span></div>
@@ -240,6 +246,7 @@
             noObstr: false, pillars: [],
             obstructions: [],      // committed free-draw obstruction polygons (each subtracts from usable)
             obstrDraft: [],        // the obstruction polygon currently being plotted
+            units: "ft",           // measurement-entry unit for lengths: 'ft' | 'in' (areas stay sq ft)
           };
         }
         var ui = freshState();
@@ -268,6 +275,12 @@
             return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
           });
         }
+        // ── measurement units (lengths only; canonical state stays in feet) ───────────
+        function uLabel() { return ui.units === "in" ? "in" : "ft"; }
+        function ftToU(ft) { return ui.units === "in" ? ft * 12 : ft; }            // feet → display unit
+        function uToFt(v) { return v == null ? null : (ui.units === "in" ? v / 12 : v); } // display → feet
+        function numU(ft) { return ft == null ? "" : String(Math.round(ftToU(ft) * 100) / 100); }
+        function fmtLen(ft) { return (Math.round(ftToU(ft) * 10) / 10).toLocaleString() + " " + uLabel(); }
 
         // ── build the neutral RoomInput dict the engine ingests ──────────────────────
         function buildRoom() {
@@ -389,7 +402,18 @@
 
         // ── the live mirror + the engine result ──────────────────────────────────────
         function compute() { return M.buildUsable(buildRoom()); }
+        function wireUnitToggle() {
+          var box = document.getElementById("unitToggle"); if (!box) return;
+          box.querySelectorAll("button").forEach(function (b) {
+            b.onclick = function () { if (ui.units !== b.dataset.unit) { ui.units = b.dataset.unit; rerender(); } };
+          });
+        }
+        function updateUnitToggle() {
+          var box = document.getElementById("unitToggle"); if (!box) return;
+          box.querySelectorAll("button").forEach(function (b) { b.classList.toggle("sel", b.dataset.unit === ui.units); });
+        }
         function renderMirror(res) {
+          updateUnitToggle();
           var mCount = document.getElementById("mCount");
           var mSub = document.getElementById("mCountSub");
           var mSqft = document.getElementById("mSqft");
@@ -503,11 +527,11 @@
         R.size = {
           html: function () {
             return stepHead("Your room's size", "Measure the <strong>inside</strong> — wall to wall, at floor level.") +
-              '<div class="tworow">' + field("width", "Width (ft)", ui.width, "e.g. 40") +
-              field("depth", "Depth (ft)", ui.depth, "e.g. 25") + "</div>" +
+              '<div class="tworow">' + mfield("width", "Width", ui.width, 40) +
+              mfield("depth", "Depth", ui.depth, 25) + "</div>" +
               '<div class="flags" id="flagbox"></div>' + nav(!!(ui.width && ui.depth));
           },
-          wire: function () { bindNum("width", "width"); bindNum("depth", "depth"); },
+          wire: function () { bindMNum("width", "width"); bindMNum("depth", "depth"); },
           flags: ["raw_dimensions_ft", "dimensions", "area", "width_ft", "depth_ft"],
         };
 
@@ -515,11 +539,11 @@
         R.extent = {
           html: function () {
             return stepHead("Roughly how big?", "Give the overall <strong>width × depth</strong> so we can size the canvas. You'll draw the true outline next.") +
-              '<div class="tworow">' + field("width", "Rough width (ft)", ui.width, "e.g. 40") +
-              field("depth", "Rough depth (ft)", ui.depth, "e.g. 25") + "</div>" +
+              '<div class="tworow">' + mfield("width", "Rough width", ui.width, 40) +
+              mfield("depth", "Rough depth", ui.depth, 25) + "</div>" +
               nav(ui.width && ui.depth);
           },
-          wire: function () { bindNum("width", "width"); bindNum("depth", "depth"); },
+          wire: function () { bindMNum("width", "width"); bindMNum("depth", "depth"); },
           flags: [],
         };
 
@@ -565,8 +589,8 @@
               '<div class="stagewrap"><svg class="stage" id="stage"></svg></div>' +
               '<div class="toolbar"><button class="tool warn" id="clearCalib">Clear points</button></div>' +
               '<label class="field"><span class="lab">That distance is…</span>' +
-              '<span class="inputrow"><input id="calibLen" type="text" inputmode="decimal" placeholder="e.g. 36" value="' +
-              (ui.calib && ui.calib.lengthFt ? ui.calib.lengthFt : "") + '" /><span class="unit">feet</span></span></label>' +
+              '<span class="inputrow"><input id="calibLen" type="text" inputmode="decimal" placeholder="e.g. ' + (ui.units === "in" ? 120 : 10) + '" value="' +
+              (ui.calib && ui.calib.lengthFt ? numU(ui.calib.lengthFt) : "") + '" /><span class="unit">' + uLabel() + '</span></span></label>' +
               '<p class="calibnote" id="calibState"></p>' + nav(!!ui.pxPerFt);
           },
           wire: function () {
@@ -584,7 +608,7 @@
             });
             document.getElementById("calibLen").addEventListener("input", function (e) {
               if (!ui.calib) ui.calib = { a: null, b: null, lengthFt: null };
-              ui.calib.lengthFt = parseNum(e.target.value); recomputeScale(); updateCalibState(); syncNav();
+              ui.calib.lengthFt = uToFt(parseNum(e.target.value)); recomputeScale(); updateCalibState(); syncNav();
             });
             updateCalibState();
             function paintScale() {
@@ -739,12 +763,12 @@
         R.ceiling = {
           html: function () {
             return stepHead("Ceiling height", "Optional for the count — <strong>required</strong> for tall attractions (VR rigs, towers, ropes courses). Floor to ceiling, in feet.") +
-              field("ceiling", "Ceiling height (ft)", ui.ceiling, "e.g. 10 (optional)") +
+              mfield("ceiling", "Ceiling height", ui.ceiling, 10) +
               '<label class="check"><input type="checkbox" id="ropes" ' + (ui.ropes ? "checked" : "") + ' />' +
               '<span class="ct">I might want something tall<small>VR rig, tower, or ropes course — flags a height-clearance check.</small></span></label>' +
               '<div class="flags" id="flagbox"></div>' + nav();
           },
-          wire: function () { bindNum("ceiling", "ceiling"); bindCheck("ropes", "ropes"); },
+          wire: function () { bindMNum("ceiling", "ceiling"); bindCheck("ropes", "ropes"); },
           flags: ["ceiling_height_ft"],
         };
 
@@ -850,6 +874,12 @@
             '<span class="inputrow"><input id="' + id + '" type="text" inputmode="decimal" placeholder="' + ph + '" value="' +
             (val !== null && val !== undefined ? val : "") + '"' + (disabled ? " disabled" : "") + " /></span></label>";
         }
+        // measurement field: stores feet canonically, displays/accepts the active unit
+        function mfield(id, base, valFt, exFt, disabled) {
+          return '<label class="field"><span class="lab">' + base + " (" + uLabel() + ")</span>" +
+            '<span class="inputrow"><input id="' + id + '" type="text" inputmode="decimal" placeholder="e.g. ' + (Math.round(ftToU(exFt) * 100) / 100) +
+            '" value="' + numU(valFt) + '"' + (disabled ? " disabled" : "") + ' /><span class="unit">' + uLabel() + "</span></span></label>";
+        }
         // nextEnabled: pass false to disable the Next button (gates a step)
         function nav(nextEnabled) {
           var list = stepList();
@@ -887,6 +917,11 @@
         function bindNum(id, key) {
           var el = document.getElementById(id); if (!el) return;
           el.addEventListener("input", function (e) { ui[key] = parseNum(e.target.value); rerenderLive(); });
+        }
+        // like bindNum but converts the entered value from the active unit into feet
+        function bindMNum(id, key) {
+          var el = document.getElementById(id); if (!el) return;
+          el.addEventListener("input", function (e) { ui[key] = uToFt(parseNum(e.target.value)); rerenderLive(); });
         }
         function bindCheck(id, key, after) {
           var el = document.getElementById(id); if (!el) return;
@@ -929,7 +964,7 @@
               var segFt = Math.hypot(eb[0] - ea[0], eb[1] - ea[1]);
               if (segFt < 0.1) continue;
               var ma = v.toPx(ea), mb = v.toPx(eb), tx = (ma[0] + mb[0]) / 2, ty = (ma[1] + mb[1]) / 2;
-              parts.push('<text x="' + tx.toFixed(1) + '" y="' + (ty - 4).toFixed(1) + '" text-anchor="middle" font-size="10" font-weight="700" paint-order="stroke" stroke="#fff" stroke-width="3" fill="' + stroke + '">' + segFt.toFixed(1) + ' ft</text>');
+              parts.push('<text x="' + tx.toFixed(1) + '" y="' + (ty - 4).toFixed(1) + '" text-anchor="middle" font-size="10" font-weight="700" paint-order="stroke" stroke="#fff" stroke-width="3" fill="' + stroke + '">' + fmtLen(segFt) + '</text>');
             }
             if (pts.length >= 3) {
               var mid = v.toPx(polyCentroid(pts));
@@ -1338,6 +1373,7 @@
           rerender();
         }
 
+        wireUnitToggle();
         rerender();
       })();
     </script>
