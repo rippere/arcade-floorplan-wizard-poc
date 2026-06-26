@@ -69,11 +69,16 @@
       header.app p { margin: 0; color: var(--muted); font-size: 0.92rem; }
 
       /* live mirror */
+      /* opaque sticky bar so the uploaded plan (or any tall canvas) scrolls cleanly
+         BEHIND the header instead of peeking around a floating, gapped mirror */
+      .stickytop {
+        position: sticky; top: 0; z-index: 5;
+        background: #eef2f8; margin: 0 -16px 16px; padding: 8px 16px 0;
+      }
       .mirror {
-        position: sticky; top: 8px; z-index: 5;
         background: var(--ink); color: #fff; border-radius: 16px;
         padding: 14px 16px; box-shadow: var(--shadow);
-        display: flex; align-items: center; gap: 14px; margin-bottom: 16px;
+        display: flex; align-items: center; gap: 14px;
       }
       .mirror .count { font-size: 2rem; font-weight: 700; line-height: 1; }
       .mirror .count small { font-size: 0.8rem; font-weight: 500; opacity: 0.8; display: block; margin-top: 3px; }
@@ -111,6 +116,9 @@
       .inputrow:focus-within { border-color: var(--brand); }
       .inputrow input { flex: 1; border: 0; outline: 0; padding: 13px 14px; font-size: 1.05rem; min-width: 0; background: transparent; color: var(--ink); }
       .inputrow .unit { display: flex; align-items: center; padding: 0 14px; background: #f4f7fb; color: var(--muted); font-weight: 600; font-size: 0.9rem; border-left: 1px solid var(--line); }
+      /* inline unit dropdown living in the input's suffix slot (replaces the top toggle) */
+      .inputrow .unitsel { border: 0; border-left: 1px solid var(--line); background: #f4f7fb; color: var(--ink); font: inherit; font-weight: 700; font-size: 0.9rem; padding: 0 10px; cursor: pointer; outline: none; }
+      .inputrow .unitsel:focus { box-shadow: inset 0 0 0 2px var(--brand); }
       .hinttext { color: var(--muted); font-size: 0.84rem; margin: 6px 2px 0; }
       .tworow { display: flex; gap: 10px; }
       .tworow label.field { flex: 1; }
@@ -195,18 +203,17 @@
     </header>
 
     <div class="wrap">
-      <!-- live mirror -->
-      <div class="mirror" id="mirror">
-        <div>
-          <div class="count" id="mCount">—<small id="mCountSub">games (rough)</small></div>
-        </div>
-        <div class="spacer"></div>
-        <div class="unittoggle" id="unitToggle" title="Measurement units">
-          <button type="button" data-unit="ft">ft</button><button type="button" data-unit="in">in</button>
-        </div>
-        <div style="text-align:right">
-          <div class="sqft" id="mSqft">choose how to start</div>
-          <div style="margin-top:6px"><span class="pill low" id="mPill">incomplete</span></div>
+      <!-- live mirror (on an opaque sticky bar; unit selection now lives at the inputs) -->
+      <div class="stickytop">
+        <div class="mirror" id="mirror">
+          <div>
+            <div class="count" id="mCount">—<small id="mCountSub">games (rough)</small></div>
+          </div>
+          <div class="spacer"></div>
+          <div style="text-align:right">
+            <div class="sqft" id="mSqft">choose how to start</div>
+            <div style="margin-top:6px"><span class="pill low" id="mPill">incomplete</span></div>
+          </div>
         </div>
       </div>
 
@@ -281,6 +288,19 @@
         function uToFt(v) { return v == null ? null : (ui.units === "in" ? v / 12 : v); } // display → feet
         function numU(ft) { return ft == null ? "" : String(Math.round(ftToU(ft) * 100) / 100); }
         function fmtLen(ft) { return (Math.round(ftToU(ft) * 10) / 10).toLocaleString() + " " + uLabel(); }
+        // unit selector rendered INLINE in an input's suffix (replaces the old top-bar
+        // toggle): pick ft/in right where you type the measurement. Sets ui.units globally.
+        function unitSelect() {
+          return '<select class="unitsel" aria-label="Measurement unit">' +
+            '<option value="ft"' + (ui.units === "ft" ? " selected" : "") + ">ft</option>" +
+            '<option value="in"' + (ui.units === "in" ? " selected" : "") + ">in</option></select>";
+        }
+        function wireUnitSelects() {
+          document.querySelectorAll(".unitsel").forEach(function (s) {
+            s.value = ui.units;
+            s.onchange = function () { if (ui.units !== s.value) { ui.units = s.value; rerender(); } };
+          });
+        }
 
         // ── build the neutral RoomInput dict the engine ingests ──────────────────────
         function buildRoom() {
@@ -608,7 +628,7 @@
               '<div class="toolbar"><button class="tool warn" id="clearCalib">Clear points</button></div>' +
               '<label class="field"><span class="lab">That distance is…</span>' +
               '<span class="inputrow"><input id="calibLen" type="text" inputmode="decimal" placeholder="e.g. ' + (ui.units === "in" ? 120 : 10) + '" value="' +
-              (ui.calib && ui.calib.lengthFt ? numU(ui.calib.lengthFt) : "") + '" /><span class="unit">' + uLabel() + '</span></span></label>' +
+              (ui.calib && ui.calib.lengthFt ? numU(ui.calib.lengthFt) : "") + '" />' + unitSelect() + '</span></label>' +
               '<p class="calibnote" id="calibState"></p>' + nav(!!ui.pxPerFt);
           },
           wire: function () {
@@ -894,9 +914,9 @@
         }
         // measurement field: stores feet canonically, displays/accepts the active unit
         function mfield(id, base, valFt, exFt, disabled) {
-          return '<label class="field"><span class="lab">' + base + " (" + uLabel() + ")</span>" +
+          return '<label class="field"><span class="lab">' + base + "</span>" +
             '<span class="inputrow"><input id="' + id + '" type="text" inputmode="decimal" placeholder="e.g. ' + (Math.round(ftToU(exFt) * 100) / 100) +
-            '" value="' + numU(valFt) + '"' + (disabled ? " disabled" : "") + ' /><span class="unit">' + uLabel() + "</span></span></label>";
+            '" value="' + numU(valFt) + '"' + (disabled ? " disabled" : "") + ' />' + unitSelect() + "</span></label>";
         }
         // nextEnabled: pass false to disable the Next button (gates a step)
         function nav(nextEnabled) {
@@ -1341,6 +1361,7 @@
           card.querySelectorAll("[data-next]").forEach(function (b) { b.addEventListener("click", function () { go(cur + 1); }); });
           card.querySelectorAll("[data-back]").forEach(function (b) { b.addEventListener("click", function () { go(cur - 1); }); });
           R[id].wire(res);
+          wireUnitSelects();
           renderMirror(res);
           rerenderFlags();
           window.scrollTo({ top: 0, behavior: "smooth" });
