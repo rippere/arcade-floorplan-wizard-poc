@@ -103,13 +103,39 @@
       return room.width_ft * room.depth_ft;
     return null;
   }
-  function usableAreaSqft(room) {
-    if (room.usable_polygon_ft && room.usable_polygon_ft.length >= 3)
-      return polygonArea(room.usable_polygon_ft);
-    if (room.polygon_ft && room.polygon_ft.length >= 3) return polygonArea(room.polygon_ft);
+  function roomBounds(room) {
+    if (room.polygon_ft && room.polygon_ft.length >= 3) return bbox(room.polygon_ft);
     if (room.width_ft && room.depth_ft && room.width_ft > 0 && room.depth_ft > 0)
-      return room.width_ft * room.depth_ft;
+      return [0.0, 0.0, room.width_ft, room.depth_ft];
     return null;
+  }
+  // Floor footprint (w×d) of interior obstructions standing inside the room — subtracted
+  // from usable area. Obstructions outside the room bounds (same test as pillar_outside)
+  // don't count. Footprint is the bbox (w_ft × d_ft) the RoomInput carries per pillar.
+  function obstructionFootprintSqft(room) {
+    const bx = roomBounds(room);
+    let total = 0.0;
+    (room.pillars || []).forEach((p) => {
+      const w = p.w_ft || 0.0;
+      const d = p.d_ft || 0.0;
+      if (w <= 0 || d <= 0) return;
+      if (bx && p.x_ft !== null && p.x_ft !== undefined && p.y_ft !== null && p.y_ft !== undefined) {
+        const [x0, y0, x1, y1] = bx;
+        if (!(x0 - 0.01 <= p.x_ft && p.x_ft <= x1 + 0.01 && y0 - 0.01 <= p.y_ft && p.y_ft <= y1 + 0.01)) return;
+      }
+      total += w * d;
+    });
+    return total;
+  }
+  function usableAreaSqft(room) {
+    let base = null;
+    if (room.usable_polygon_ft && room.usable_polygon_ft.length >= 3)
+      base = polygonArea(room.usable_polygon_ft);
+    else if (room.polygon_ft && room.polygon_ft.length >= 3) base = polygonArea(room.polygon_ft);
+    else if (room.width_ft && room.depth_ft && room.width_ft > 0 && room.depth_ft > 0)
+      base = room.width_ft * room.depth_ft;
+    if (base === null) return null;
+    return Math.max(0.0, base - obstructionFootprintSqft(room));
   }
   function gameCount(areaSqft) {
     if (areaSqft === null || areaSqft === undefined || areaSqft <= 0) return null;
@@ -367,6 +393,7 @@
   // ── standard caveat library (Mike: boilerplate on EVERY usable) ──────────────────
   function buildCaveats(room) {
     const doorAssumed = room.doors.length === 0 || room.doors.some((d) => d.assumed);
+    const obstructionSqft = obstructionFootprintSqft(room);
     const rules = [
       [
         doorAssumed,
@@ -384,6 +411,10 @@
       [
         room.pillars.length === 0,
         "No interior obstructions (pillars, soffits, low beams) were supplied — if any exist, the real usable area will be smaller.",
+      ],
+      [
+        obstructionSqft > 0,
+        `Interior obstructions (~${Math.round(obstructionSqft).toLocaleString()} sq ft) have been subtracted from the usable area above.`,
       ],
       [
         true,

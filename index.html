@@ -393,11 +393,19 @@
           for (var i = 0; i <= 10; i++) { var ang = a0 + d * i / 10; poly.push([hinge[0] + w * Math.cos(ang), hinge[1] + w * Math.sin(ang)]); }
           return poly;
         }
-        function obstructionArea() {
-          return (ui.noObstr ? [] : ui.obstructions).reduce(function (s, ob) { return s + (ob.length >= 3 ? polyArea(ob) : 0); }, 0);
+        // Door swing is the ONLY UI-side deduction left — the engine doesn't model the
+        // inward-swing geometry. Obstructions/pillars are now subtracted by the engine
+        // itself (usable_area_sqft / validate.js's usableAreaSqft), so res.usable_sqft
+        // already excludes them — re-subtracting here would double-count.
+        function swingAreaFt2() { var sw = doorSwingPoly(); return sw ? polyArea(sw) : 0; }
+        // What the engine removed for obstructions: each pillar's bbox footprint (w×d) —
+        // the same quantity usableAreaSqft subtracts. Used only for the review breakdown
+        // line, so "usable area" + "less obstructions / door swing" reconciles to the gross.
+        function obstructionDeductionFt2() {
+          return buildRoom().pillars.reduce(function (s, p) { return s + (p.w_ft || 0) * (p.d_ft || 0); }, 0);
         }
-        function deductionsFt2() { var sw = doorSwingPoly(); return obstructionArea() + (sw ? polyArea(sw) : 0); }
-        function netUsableSqft(res) { return res.usable_sqft == null ? null : Math.max(0, res.usable_sqft - deductionsFt2()); }
+        function deductionsFt2() { return obstructionDeductionFt2() + swingAreaFt2(); }
+        function netUsableSqft(res) { return res.usable_sqft == null ? null : Math.max(0, res.usable_sqft - swingAreaFt2()); }
         function netGames(res) { var n = netUsableSqft(res); return n == null ? null : Math.floor(n / 70); }
 
         // ── the live mirror + the engine result ──────────────────────────────────────
