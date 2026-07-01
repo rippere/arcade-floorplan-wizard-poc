@@ -23,7 +23,7 @@
 
       WHY IT REUSES, NOT REBUILDS: the validation + usable math is the SAME engine the
       Python pipeline runs (src/arcade_optimizer/usables). Its browser port,
-      validate.js, ALREADY models polygon_ft (outline), usable_polygon_ft
+      ../measure/validate.js, ALREADY models polygon_ft (outline), usable_polygon_ft
       (the highlighted green box → usable_sqft), extraction_confidence, windows, doors,
       pillars — and already flags usable_exceeds_room / poly_rect_mismatch / degenerate
       polygons. This file is PURE UI over that contract; it changes no engine code, so
@@ -170,6 +170,55 @@
       .pillarlist { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
       .pillarchip { background: #eef2f8; border-radius: 999px; padding: 4px 10px; font-size: 0.82rem; display: flex; gap: 6px; align-items: center; }
       .pillarchip button { border: 0; background: none; color: var(--red); font-weight: 800; cursor: pointer; font-size: 1rem; line-height: 1; padding: 0; }
+      .pillarchip.bad { background: #fdecea; color: var(--red); }
+      /* Phase A: game palette */
+      .palfilter { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0 2px; }
+      .palsearch { flex: 1 1 160px; min-width: 120px; border: 1.5px solid var(--line); border-radius: 10px;
+        background: #fff; color: var(--ink); font: inherit; font-size: 0.92rem; padding: 9px 11px; outline: none; }
+      .palsearch:focus { border-color: #0b63c4; }
+      .palcat { border: 1.5px solid var(--line); border-radius: 10px; background: #fff; color: var(--ink);
+        font: inherit; font-size: 0.9rem; padding: 9px 10px; cursor: pointer; outline: none; }
+      .palcount { font-size: 0.74rem; color: var(--muted); white-space: nowrap; margin-left: auto; }
+      .palette { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 4px; max-height: 220px; overflow-y: auto; }
+      .palempty { color: var(--muted); font-size: 0.86rem; padding: 8px 2px; }
+      .palettile { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; text-align: left;
+        background: #eef2f8; border: 1px solid #cdd8e6; border-radius: 8px; padding: 6px 9px; cursor: grab; font: inherit; }
+      .palettile:hover { background: #e3ebf6; }
+      .palettile.armed { background: #d7e6ff; border-color: #0b63c4; box-shadow: 0 0 0 2px rgba(11,99,196,.25); }
+      .palettile .ptn { font-size: 0.82rem; font-weight: 600; }
+      .palettile .ptd { font-size: 0.72rem; color: var(--muted); }
+      .legend { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+      .legend .lg-ok { color: #0b63c4; } .legend .lg-bad { color: var(--red); }
+      /* placement editor v2: per-selection action bar + selected chip */
+      .gameactions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+        margin: 8px 0 2px; padding: 8px 10px; border: 1px solid #cfe0f5; border-radius: 10px; background: #f0f6ff; }
+      .gameactions .ga-name { font-weight: 700; font-size: 0.86rem; margin-right: auto; color: var(--brand-ink); }
+      .gameactions button { font: inherit; font-size: 0.82rem; font-weight: 600; border: 1.5px solid var(--line);
+        background: #fff; color: var(--ink); border-radius: 8px; padding: 7px 11px; cursor: pointer; }
+      .gameactions button:hover { border-color: #c4d2e6; }
+      .gameactions button.danger { color: var(--red); border-color: #f3cdc8; }
+      .pillarchip.sel { outline: 2px solid var(--brand); outline-offset: 1px; }
+      /* palette v2: larger tiles in a grid, each carrying a proportional top-down silhouette */
+      .palette { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+        gap: 8px; margin: 6px 0 4px; max-height: 260px; overflow-y: auto; padding: 2px; }
+      .palettile { display: flex; flex-direction: column; align-items: stretch; gap: 4px; text-align: left;
+        background: #f6f9fd; border: 1px solid #cdd8e6; border-radius: 10px; padding: 8px; cursor: grab; font: inherit; }
+      .palettile:hover { background: #eef4fc; border-color: #b8c8de; }
+      .palettile.armed { background: #d7e6ff; border-color: #0b63c4; box-shadow: 0 0 0 2px rgba(11,99,196,.25); }
+      .palettile .pthumb { display: flex; align-items: center; justify-content: center; height: 46px;
+        background: #fff; border: 1px solid #e3e8ef; border-radius: 7px; }
+      .palettile .pthumb svg { display: block; max-width: 100%; height: auto; }
+      .palettile .ptn { font-size: 0.8rem; font-weight: 600; line-height: 1.2; }
+      .palettile .ptd { font-size: 0.71rem; color: var(--muted); }
+      .palempty { color: var(--muted); font-size: 0.86rem; padding: 8px 2px; grid-column: 1 / -1; }
+      /* Phase B: advisory compliance layer panel + non-dismissable badge (doc 16) */
+      .layerpanel { margin: 10px 0 4px; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; background: #f7faff; }
+      .lphead { font-weight: 700; font-size: 0.9rem; display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+      .lphead small { font-weight: 500; color: var(--muted); font-size: 0.74rem; }
+      .lptoggles { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 8px; }
+      .lptoggle { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.86rem; font-weight: 600; }
+      .lptoggle input { width: 17px; height: 17px; accent-color: var(--brand); cursor: pointer; }
+      .layerbadge { margin-top: 10px; background: var(--amber-soft); color: #7a5212; border: 1px solid #f0d9a8; border-radius: 8px; padding: 8px 10px; font-size: 0.8rem; line-height: 1.4; }
 
       /* nav */
       .nav { display: flex; gap: 10px; margin-top: 20px; }
@@ -224,10 +273,37 @@
     </div>
 
     <script src="validate.js"></script>
+    <!-- Full ~340-game Betson catalog, generated from research/betson-catalog.csv by
+         scripts/build_catalog_js.py. Static (no runtime fetch) so the wizard stays offline
+         from file://. Optional: if absent, the page falls back to the in-page seed list. -->
+    <script src="catalog.js"></script>
     <script>
       (function () {
         "use strict";
         var M = window.BetsonMeasure;
+
+        // ── Phase A in-page seed game catalog ────────────────────────────────────────
+        // Footprints (w_ft × d_ft) for the "Place games" step's palette. NOTE: wiring this
+        // to research/betson-catalog.csv is a follow-up that will replace this literal.
+        var GAME_CATALOG = [
+          { id: "skeeball",   name: "Skee-Ball Alley",            w_ft: 2.5, d_ft: 13 },
+          { id: "airhockey",  name: "Air Hockey",                 w_ft: 4,   d_ft: 7.5 },
+          { id: "bball2",     name: "Basketball Hoops (double)",  w_ft: 5,   d_ft: 11 },
+          { id: "racing",     name: "Sit-down Racing",            w_ft: 3,   d_ft: 6 },
+          { id: "crane",      name: "Crane / Claw Machine",       w_ft: 3,   d_ft: 3 },
+          { id: "pinball",    name: "Pinball",                    w_ft: 2.5, d_ft: 5 },
+          { id: "dance",      name: "Dance / Rhythm Game",        w_ft: 3.5, d_ft: 4.5 },
+          { id: "upright",    name: "Redemption Upright",         w_ft: 2.5, d_ft: 3 },
+          { id: "photo",      name: "Photo Booth",                w_ft: 4,   d_ft: 5 },
+          { id: "ticketeater",name: "Ticket Eater / Counter",     w_ft: 2,   d_ft: 2.5 },
+          { id: "whacamole",  name: "Whac-A-Mole",                w_ft: 2.5, d_ft: 4 },
+          { id: "coinpusher", name: "Coin Pusher",                w_ft: 3,   d_ft: 4 },
+        ];
+        // Prefer the full generated catalog (catalog.js) when it loaded; fall back to the
+        // seed list above so the page still works standalone if catalog.js is missing.
+        if (window.GAME_CATALOG_FULL && window.GAME_CATALOG_FULL.length) {
+          GAME_CATALOG = window.GAME_CATALOG_FULL;
+        }
 
         // ── capture state — a superset of the RoomInput we are building ──────────────
         function freshState() {
@@ -253,6 +329,8 @@
             noObstr: false, pillars: [],
             obstructions: [],      // committed free-draw obstruction polygons (each subtracts from usable)
             obstrDraft: [],        // the obstruction polygon currently being plotted
+            placedGames: [],       // [{id,name,category,x_ft,y_ft,w_ft,d_ft,rotation_deg}] dropped game footprints
+            selectedGame: null,    // UI-only: index into placedGames of the selected footprint (or null)
             units: "ft",           // measurement-entry unit for lengths: 'ft' | 'in' (areas stay sq ft)
           };
         }
@@ -261,11 +339,11 @@
         // dynamic step list, computed per mode. Each entry is a step id.
         function stepList() {
           if (ui.mode === "rectangle")
-            return ["size", "usable", "door", "ceiling", "pillars", "review"];
+            return ["size", "usable", "door", "ceiling", "pillars", "placeGames", "review"];
           if (ui.mode === "irregular")
-            return ["extent", "outline", "usable", "door", "ceiling", "pillars", "review"];
+            return ["extent", "outline", "usable", "door", "ceiling", "pillars", "placeGames", "review"];
           if (ui.mode === "media")
-            return ["upload", "scale", "outline", "usable", "door", "ceiling", "pillars", "review"];
+            return ["upload", "scale", "outline", "usable", "door", "ceiling", "pillars", "placeGames", "review"];
           return ["start"]; // mode not chosen yet
         }
         var cur = 0; // index into stepList()
@@ -345,6 +423,32 @@
             room.notes.push("Outline captured interactively — Betson confirms the true outline.");
           }
           if (usable) room.usable_polygon_ft = usable;
+          if (ui.placedGames && ui.placedGames.length) {
+            room.placements = ui.placedGames.map(function (p) {
+              return {
+                id: p.id, name: p.name,
+                x_ft: +p.x_ft.toFixed(1), y_ft: +p.y_ft.toFixed(1),
+                w_ft: +p.w_ft.toFixed(1), d_ft: +p.d_ft.toFixed(1),
+                rotation_deg: p.rotation_deg || 0,
+              };
+            });
+          }
+          // Advisory compliance layers (doc 16): when a layer is toggled ON and it produced
+          // findings, attach its disclaimer + findings so the "draft guidance, not a code
+          // certification" note travels WITH the exported artifact (doc 16 requires this).
+          var advisories = [];
+          ADVISORY_LAYERS.forEach(function (layer) {
+            if (!layerState[layer.id]) return;
+            var f = layer.compute();
+            if (f && f.length) {
+              advisories.push({
+                layer: layer.id,
+                disclaimer: layer.badge.replace(/&amp;/g, "&"),
+                findings: f.map(function (x) { return { code: x.kind, message: x.message, detail: x.hint }; }),
+              });
+            }
+          });
+          if (advisories.length) room.advisories = advisories;
           return room;
         }
 
@@ -423,6 +527,173 @@
           if (ui.obstrDraft && ui.obstrDraft.length >= 3) list.push(ui.obstrDraft);
           return list;
         }
+        // ════════════════════════════════════════════════════════════════════════════
+        //  ADVISORY COMPLIANCE LAYERS (doc 16) — a generic, toggleable overlay registry.
+        //  Each layer = { id, label, badge, compute()->[findings], render(view,sc)->{svg,
+        //  findings} }. Findings are ADVISORY only: they highlight + list, and NEVER gate
+        //  Next (Phase A parity). Adding the fire / electrical / sightline layers later is
+        //  just pushing another object onto ADVISORY_LAYERS — no new plumbing.
+        // ════════════════════════════════════════════════════════════════════════════
+        var ADA_AISLE_MIN_FT = 3.0;       // ADA / egress minimum clear aisle (36")
+        var EXIT_KEEPOUT_DEPTH_FT = 5.0;  // keep-out depth projected in front of each door
+
+        // pinch point between two top-left AABB rects — midpoint of their closest points.
+        function rectPinch(a, b) {
+          var ca = [a.x + a.w / 2, a.y + a.d / 2], cb = [b.x + b.w / 2, b.y + b.d / 2];
+          var na = [Math.max(a.x, Math.min(cb[0], a.x + a.w)), Math.max(a.y, Math.min(cb[1], a.y + a.d))];
+          var nb = [Math.max(b.x, Math.min(ca[0], b.x + b.w)), Math.max(b.y, Math.min(ca[1], b.y + b.d))];
+          return [(na[0] + nb[0]) / 2, (na[1] + nb[1]) / 2];
+        }
+        // The door openings the ADA layer can reason about: each {pos,a,b,widthFt,inward}
+        // from the single placed door (ui.doorPos), with its wall segment + inward ref.
+        function adaDoors() {
+          var out = [], room = roomPoly();
+          if (ui.doorPos && room) {
+            var near = nearestOnPoly(ui.doorPos, room);
+            var w = doorWidthFt() || (M.DEFAULT_DOOR_WIDTH_IN / 12);
+            out.push({ pos: ui.doorPos, a: near.a, b: near.b, widthFt: w, inward: polyCentroid(room) });
+          }
+          return out;
+        }
+        // ── placement geometry: free 0–360° rotation (doc 17 Phase 4) ─────────────────
+        // x_ft,y_ft are the footprint's top-left corner in its RAW (θ=0) orientation —
+        // ALWAYS, regardless of rotation_deg. The rotation pivot (center) is therefore
+        // always g.x_ft+g.w_ft/2, g.y_ft+g.d_ft/2, with no swap/recompute needed at any
+        // angle — this is what makes rotateGame's center exact (no repeated-rotate drift,
+        // the bug Phase 4 was scoped to kill) and lets every consumer below (obbInUsable /
+        // obbOverlap / inflateObb / obbAABB / obbCorners) work unchanged at any θ, not just
+        // quarter-turns.
+        function gameObb(g) {
+          return { cx: g.x_ft + g.w_ft / 2, cy: g.y_ft + g.d_ft / 2, w: g.w_ft, d: g.d_ft, deg: g.rotation_deg || 0 };
+        }
+        // unpack an {cx,cy,w,d,deg} OBB into its 4 floor-ft corners.
+        function obbToCorners(o) { return M.obbCorners(o.cx, o.cy, o.w, o.d, o.deg); }
+        // Rotate in place. The center never moves (x_ft,y_ft is θ-independent — see above),
+        // so this is exact at any angle and any number of repeated calls; deltaDeg may be
+        // fractional (drag-rotate) — round only at display time (the #fpReadout), never here.
+        function rotateGame(g, deltaDeg) {
+          g.rotation_deg = ((((g.rotation_deg || 0) + deltaDeg) % 360) + 360) % 360;
+        }
+        // Per-side clearance (doc 17 Phase 6, pulled forward): a player only needs standing
+        // room at the FRONT face — back and sides default to 0, since most cabinets can sit
+        // flush there. This is a single global rule for now; per-game-type exceptions (a
+        // pinball that needs side access, etc.) are a follow-up once real orientation data
+        // lands (assets/orient_defaults.py -> scripts/build_catalog_js.py -> catalog.js).
+        // front/back/left/right are local to the OBB and rotate with it (inflateObb, Phase 1).
+        function clearanceSpec() {
+          return { front: (M.CLEARANCE_FT != null ? M.CLEARANCE_FT : 2.5), back: 0, left: 0, right: 0 };
+        }
+        // Does this game face the player from one side? Compact port of
+        // assets/orient_defaults.py: cranes / table games / VR are freestanding (played from
+        // all sides) → no single front; everything else fronts the player. Drives the
+        // on-floor orientation marker so a rotated layout reads like a real plan.
+        function hasPlayerFront(g) {
+          var hay = ((g.category || "") + " " + (g.name || "")).toLowerCase();
+          var freestanding = ["crane", "claw", "plush", "merch", "air hockey", "hockey",
+            "pool", "foosball", "table", "shuffle", "vr", "virtual"];
+          for (var i = 0; i < freestanding.length; i++) if (hay.indexOf(freestanding[i]) !== -1) return false;
+          return true;
+        }
+        // Outward unit vector of the FRONT edge at the game's actual rotation_deg (screen
+        // coords, +Y down). Front = local +y rotated by θ using the SAME rotation obbCorners
+        // applies to the box itself (cos/sin, θ measured the identical way) — this is what
+        // makes the front marker rotate WITH the box at every angle, not just quarter-turns.
+        // NOTE (doc 17 Phase 4): the old quarter-turn switch-case here was hand-tuned per
+        // angle, not derived from one rotation — it happened to put front at 90°→right,
+        // 270°→left, which is the OPPOSITE handedness from obbCorners' own rotation (verified
+        // by direct corner math: e2/front-edge rotated via obbCorners lands at 90°→left,
+        // 270°→right; the two conventions only coincide at 0°/180°, where +θ and −θ are the
+        // same rotation). That mismatch was invisible at quarter-turns (an axis-aligned
+        // rectangle's silhouette can't reveal handedness) but would make the marker visibly
+        // spin backwards relative to the box at any non-quarter angle. Fixed here: front now
+        // shares the box's own rotation sense everywhere, which flips which side it lands on
+        // at exactly 90°/270° vs the old behavior — an intentional, geometrically-required
+        // correction, not a regression.
+        function frontDir(g) {
+          var t = ((g.rotation_deg || 0) * Math.PI) / 180;
+          return [-Math.sin(t), Math.cos(t)];
+        }
+        // keydown handler for the placement step (rotate/dup/delete) — see wireFootprints.
+        var fpKeyHandler = null;
+
+        var adaEgressLayer = {
+          id: "ada",
+          label: "ADA / egress (advisory)",
+          // non-dismissable disclaimer; &amp; so it is safe to drop straight into innerHTML.
+          badge: "Draft check — accessible-route &amp; egress guidance only. Not a code " +
+                 "certification; the AHJ / building department signs off.",
+          // pure-ish: reads placed games + the door, returns advisory findings (no SVG).
+          compute: function () {
+            var findings = [];
+            var games = ui.placedGames || [];
+            var clear = clearanceSpec();
+            // ── Sub-36" aisle pinches between game BASE rects ──
+            for (var i = 0; i < games.length; i++) {
+              for (var j = i + 1; j < games.length; j++) {
+                var oa = gameObb(games[i]), ob = gameObb(games[j]);
+                var gap = M.obbGap(oa, ob);
+                if (gap > 0.01 && gap < ADA_AISLE_MIN_FT) {
+                  findings.push({
+                    kind: "aisle",
+                    pinch: rectPinch(M.obbAABB(oa), M.obbAABB(ob)),
+                    message: "Aisle < 36in (ADA min)",
+                    hint: '“' + games[i].name + '” and “' + games[j].name + '” sit ' + Math.round(gap * 12) +
+                          'in apart — ADA accessible routes need a 36in clear aisle.',
+                  });
+                }
+              }
+            }
+            // ── Exit keep-out: nothing should block the path out of a door ──
+            adaDoors().forEach(function (d) {
+              var zone = M.doorKeepout(d.pos, d.a, d.b, d.inward, d.widthFt, EXIT_KEEPOUT_DEPTH_FT);
+              games.forEach(function (g) {
+                var obb = gameObb(g);
+                if (M.obbIntersectsPoly(obb, zone) || M.obbIntersectsPoly(M.inflateObb(obb, clear), zone)) {
+                  findings.push({
+                    kind: "exit", game: g,
+                    message: "Blocks exit access",
+                    hint: '“' + g.name + '” sits in the ' + EXIT_KEEPOUT_DEPTH_FT +
+                          'ft egress keep-out in front of the door — keep the exit path clear.',
+                  });
+                }
+              });
+            });
+            // FOLLOW-UP (v2): full accessible-route pathfinding — a continuous ≥36in path
+            // from every game / entrance to an exit — is OUT OF SCOPE for v1. This pass only
+            // flags pairwise aisle pinches + per-door keep-outs (doc 16 "accessible-route").
+            return findings;
+          },
+          render: function (view, sc) {
+            var parts = [], findings = this.compute();
+            // egress keep-out zones (advisory red, dashed) — reuse Phase A's #d22 language.
+            adaDoors().forEach(function (d) {
+              var zone = M.doorKeepout(d.pos, d.a, d.b, d.inward, d.widthFt, EXIT_KEEPOUT_DEPTH_FT);
+              var path = zone.map(function (p, i) { var q = view.toPx(p); return (i ? "L" : "M") + q[0].toFixed(1) + " " + q[1].toFixed(1); }).join(" ") + " Z";
+              parts.push('<path d="' + path + '" fill="rgba(210,34,34,.10)" stroke="#d22" stroke-width="1.5" stroke-dasharray="5 4" pointer-events="none" />');
+            });
+            findings.forEach(function (f) {
+              if (f.kind === "aisle") {
+                var q = view.toPx(f.pinch);
+                parts.push('<circle cx="' + q[0].toFixed(1) + '" cy="' + q[1].toFixed(1) + '" r="7" fill="rgba(210,34,34,.22)" stroke="#d22" stroke-width="2" pointer-events="none" />');
+                parts.push('<text x="' + q[0].toFixed(1) + '" y="' + (q[1] + 3.5).toFixed(1) + '" text-anchor="middle" font-size="10" font-weight="800" fill="#d22" pointer-events="none">⚠</text>');
+              } else if (f.kind === "exit" && f.game) {
+                // Repointed onto obbCorners (doc 17 must-fix): the prior <rect> used RAW
+                // g.w_ft/g.d_ft, which silently drew the un-swapped footprint for a 90/270
+                // rotated game. obbCorners rotates the raw dims itself, so this is correct
+                // at any angle.
+                var corners = obbToCorners(gameObb(f.game));
+                var pts = corners.map(function (c) { var q = view.toPx(c); return q[0].toFixed(1) + "," + q[1].toFixed(1); }).join(" ");
+                parts.push('<polygon points="' + pts + '" fill="none" stroke="#d22" stroke-width="2.5" stroke-dasharray="4 3" pointer-events="none" />');
+              }
+            });
+            return { svg: parts.join(""), findings: findings };
+          },
+        };
+
+        // The registry + per-layer enabled state. Later layers slot in here untouched.
+        var ADVISORY_LAYERS = [adaEgressLayer];
+        var layerState = {}; // layer id -> enabled bool
+
         // Door swing is the ONLY UI-side deduction left — the engine doesn't model the
         // inward-swing geometry. Obstructions/pillars are now subtracted by the engine
         // itself (usable_area_sqft / validate.js's usableAreaSqft), so res.usable_sqft
@@ -609,7 +880,7 @@
               var reader = new FileReader();
               reader.onload = function (ev) {
                 ui.imageDataUrl = ev.target.result;
-                ui.pxPerFt = null; ui.calib = null; ui.polygon_ft = []; ui.usable_polygon_ft = [];
+                ui.pxPerFt = null; ui.calib = null; ui.polygon_ft = []; ui.usable_polygon_ft = []; ui.placedGames = [];
                 var img = new Image();
                 img.onload = function () { ui.imgNatural = { w: img.naturalWidth, h: img.naturalHeight }; rerender(); };
                 img.src = ui.imageDataUrl;
@@ -850,6 +1121,63 @@
           });
         }
 
+        // —— place games (all) — Phase A browser-only drag-to-place ──────────────────────
+        R.placeGames = {
+          html: function () {
+            // proportional top-down silhouette per tile — recognition WITHOUT photographic
+            // art (doc 16 iteration-1: "render the game, not just its name", buildable today).
+            // The warm bar marks the front (player side) so shape + orientation read at a glance.
+            function paletteThumb(g) {
+              var W = 44, H = 40, pad = 4,
+                  s = Math.min((W - 2 * pad) / Math.max(g.w_ft, 0.1), (H - 2 * pad) / Math.max(g.d_ft, 0.1)),
+                  rw = g.w_ft * s, rh = g.d_ft * s, x = (W - rw) / 2, y = (H - rh) / 2;
+              var front = hasPlayerFront(g)
+                ? '<line x1="' + x.toFixed(1) + '" y1="' + (y + rh).toFixed(1) + '" x2="' + (x + rw).toFixed(1) + '" y2="' + (y + rh).toFixed(1) + '" stroke="#b7791f" stroke-width="3" stroke-linecap="round" />'
+                : "";
+              return '<span class="pthumb"><svg viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H + '" aria-hidden="true">' +
+                '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + rw.toFixed(1) + '" height="' + rh.toFixed(1) + '" rx="2" fill="rgba(11,99,196,.14)" stroke="#0b63c4" stroke-width="1.5" />' +
+                front + "</svg></span>";
+            }
+            var tiles = GAME_CATALOG.map(function (g) {
+              var cat = g.category || "";
+              return '<button type="button" class="palettile" draggable="true" data-gid="' + escapeHtml(g.id) +
+                '" data-cat="' + escapeHtml(cat) + '" data-nl="' + escapeHtml(String(g.name).toLowerCase()) + '" title="' + escapeHtml(g.name) + '">' +
+                paletteThumb(g) +
+                '<span class="ptn">' + escapeHtml(g.name) + '</span>' +
+                '<span class="ptd">' + g.w_ft + ' × ' + g.d_ft + ' ft</span></button>';
+            }).join("");
+            // category dropdown from the catalog (skips entries with no category, e.g. the seed)
+            var catset = {};
+            GAME_CATALOG.forEach(function (g) { if (g.category) catset[g.category] = 1; });
+            var catOpts = '<option value="">All categories</option>' +
+              Object.keys(catset).sort().map(function (c) {
+                return '<option value="' + escapeHtml(c) + '">' + escapeHtml(c) + '</option>';
+              }).join("");
+            var filter =
+              '<div class="palfilter">' +
+                '<input id="palSearch" type="search" class="palsearch" autocomplete="off"' +
+                  ' placeholder="Search ' + GAME_CATALOG.length + ' games…" aria-label="Search games" />' +
+                (Object.keys(catset).length ? '<select id="palCat" class="palcat" aria-label="Filter by category">' + catOpts + '</select>' : '') +
+                '<span class="palcount" id="palCount"></span>' +
+              '</div>';
+            return stepHead("Place games", "Optional — sketch a rough layout. <strong>Drag a game</strong> onto the floor (or tap a tile, then tap the floor). <strong>Click a placed game to select it</strong> — then rotate, duplicate, or delete it (or press <strong>R</strong> to rotate). Each shows a 2.5&nbsp;ft clearance ring; red means it spills outside the usable area or overlaps another game's clearance — advisory only, never blocks Next.") +
+              filter +
+              '<div class="palette">' + tiles + '<div class="palempty" id="palEmpty" hidden>No games match.</div></div>' +
+              '<div class="stagewrap"><svg class="stage" id="stage"></svg></div>' +
+              '<div class="gameactions" id="gameActions" hidden></div>' +
+              '<div class="pillarlist" id="gameList"></div>' +
+              '<p class="calibnote legend"><span class="lg-ok">■</span> fits &nbsp; <span class="lg-bad">■</span> outside usable / clearance overlap &nbsp; <span style="color:#b7791f">▬</span> front (player side)</p>' +
+              layerPanelHtml() +
+              '<div class="flags" id="layerFindings"></div>' +
+              '<div class="flags" id="flagbox"></div>' + nav(true);
+          },
+          wire: function () {
+            wireFootprints(document.getElementById("stage"));
+            wirePaletteFilter();
+          },
+          flags: [],
+        };
+
         // —— review (all) ———————————————————————————————————————————————————————————————
         R.review = {
           html: function (res) {
@@ -903,6 +1231,18 @@
         };
 
         // ── shared HTML builders ─────────────────────────────────────────────────────
+        // Advisory-layer panel (doc 16): a toggle per registered layer + a non-dismissable
+        // badge slot. Generic over ADVISORY_LAYERS so fire/electrical layers need no markup.
+        function layerPanelHtml() {
+          var toggles = ADVISORY_LAYERS.map(function (l) {
+            return '<label class="lptoggle"><input type="checkbox" data-layer="' + l.id + '"' +
+              (layerState[l.id] ? " checked" : "") + ' /><span class="lpname">' + l.label + "</span></label>";
+          }).join("");
+          return '<div class="layerpanel"><div class="lphead">Advisory layers ' +
+            "<small>overlays — advisory only, never block Next</small></div>" +
+            '<div class="lptoggles">' + toggles + "</div>" +
+            '<div class="layerbadge" id="layerBadge" hidden></div></div>';
+        }
         function stepHead(title, lead) {
           var list = stepList();
           return '<div class="stepno">Step ' + (cur + 1) + " of " + list.length + "</div><h2>" + title + "</h2><p class='lead'>" + lead + "</p>";
@@ -1084,6 +1424,430 @@
             ui.pillars.push({ x_ft: Math.round(ft[0]*10)/10, y_ft: Math.round(ft[1]*10)/10, w_ft: 2, d_ft: 2 });
             paint(); rerenderMirrorOnly();
           };
+        }
+
+        // ── palette search / category filter (substring over name + exact category) ───
+        function wirePaletteFilter() {
+          var search = document.getElementById("palSearch");
+          var catsel = document.getElementById("palCat"); // absent when no categories (seed)
+          var count = document.getElementById("palCount");
+          var empty = document.getElementById("palEmpty");
+          var tiles = Array.prototype.slice.call(document.querySelectorAll(".palettile"));
+          if (!search && !catsel) return;
+          function apply() {
+            var q = search ? search.value.trim().toLowerCase() : "";
+            var c = catsel ? catsel.value : "";
+            var shown = 0;
+            tiles.forEach(function (t) {
+              var okName = !q || (t.dataset.nl || "").indexOf(q) !== -1;
+              var okCat = !c || t.dataset.cat === c;
+              var vis = okName && okCat;
+              t.style.display = vis ? "" : "none";
+              if (vis) shown++;
+            });
+            if (count) count.textContent = shown + " of " + tiles.length;
+            if (empty) empty.hidden = shown !== 0;
+          }
+          if (search) search.oninput = apply;
+          if (catsel) catsel.onchange = apply;
+          apply();
+        }
+
+        // ── game-footprint editor (Phase A++: palette drop + select + move + rotate) ──
+        function wireFootprints(svg) {
+          if (!svg) return;
+          var pendingGame = null; // {gid} armed from a palette tile (touch / DnD pickup)
+          function curView() { return makeStage(svg, { image: ui.mode === "media" && !!ui.pxPerFt }); }
+          function selValid() { return ui.selectedGame != null && !!ui.placedGames[ui.selectedGame]; }
+          function isBad(room, i) {
+            var oi = gameObb(ui.placedGames[i]);
+            if (!M.obbInUsable(oi, M.pickUsable(room))) return true;
+            var pad = clearanceSpec();
+            for (var j = 0; j < ui.placedGames.length; j++) {
+              if (j === i) continue;
+              var oj = M.inflateObb(gameObb(ui.placedGames[j]), pad);
+              if (M.obbOverlap(oj, oi)) return true;
+            }
+            return false;
+          }
+          // front-edge endpoints (ft), at ANY rotation_deg — drives the player marker + handle.
+          // The front edge is corners[3]->corners[2] of the box's own obbCorners (the local
+          // +y edge — see frontDir's comment for why this must share obbCorners' rotation
+          // sense rather than a hand-tuned per-quadrant table).
+          function frontEdge(g) {
+            var c = obbToCorners(gameObb(g));
+            return [c[3], c[2]];
+          }
+          function paint() {
+            var v = curView();
+            var room = buildRoom();
+            var parts = [v.bg];
+            // room backdrop — transparent over an uploaded plan, else faint fill
+            var roomFill = v.image ? "none" : "#fbfdff";
+            var rp = roomPoly();
+            if (rp) parts.push('<path d="' + polyToPath(v, rp) + '" fill="' + roomFill + '" stroke="#0b63c4" stroke-width="2" />');
+            // green usable region for placement context
+            var usable = ui.usable_polygon_ft.length >= 3 ? ui.usable_polygon_ft : rp;
+            if (usable) parts.push('<path d="' + polyToPath(v, usable) + '" fill="rgba(26,157,82,.12)" stroke="#1a9d52" stroke-width="2" stroke-dasharray="5 4" />');
+            var sc = v.scale || 6;
+            // floor-ft OBB corners -> an SVG polygon "points" string in pixel space.
+            function cornersPts(corners) {
+              return corners.map(function (c) { var q = v.toPx(c); return q[0].toFixed(1) + "," + q[1].toFixed(1); }).join(" ");
+            }
+            ui.placedGames.forEach(function (g, i) {
+              // Phase 4 (doc 17): true <polygon> rendering at any θ, not just quarter-turns —
+              // obbAABB's <rect> shortcut (Phase 2) only worked because it reduced exactly to
+              // an axis-aligned rect at quarter-turns; that's no longer true once rotation is
+              // free, so every shape below is the box's actual obbCorners.
+              var obb = gameObb(g);
+              var corners = obbToCorners(obb);
+              var bad = isBad(room, i);
+              var selected = (i === ui.selectedGame);
+              var stroke = bad ? "#d22" : "#0b63c4";
+              // clearance ring FIRST (behind the base), inflated by CLEARANCE_FT per side
+              var crCorners = obbToCorners(M.inflateObb(obb, clearanceSpec()));
+              parts.push('<polygon points="' + cornersPts(crCorners) + '" fill="rgba(11,99,196,.10)" stroke="' + stroke + '" stroke-width="1.5" stroke-dasharray="4 3" pointer-events="none" />');
+              // base polygon doubles as the grab / hit region (mirrors the .vtx halo pattern)
+              parts.push('<polygon class="vtx" data-fp="' + i + '" points="' + cornersPts(corners) + '" fill="' + (bad ? "rgba(210,34,34,.18)" : "rgba(11,99,196,.20)") + '" stroke="' + stroke + '" stroke-width="2.5" />');
+              // front (player-side) marker — warm bar along the front edge + outward chevron,
+              // so a rotated layout reads like a real plan (orientation = which way it faces).
+              // Freestanding games (hasPlayerFront false) skip the marker itself, but the
+              // rotate handle below is independent of "front" semantics — every selected game
+              // can be rotated, including freestanding ones — so it must NOT be nested inside
+              // this hasPlayerFront check.
+              var fe = frontEdge(g), a = v.toPx(fe[0]), b = v.toPx(fe[1]);
+              var fd = frontDir(g), mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2, n = [-fd[1], fd[0]], t = 6;
+              if (hasPlayerFront(g)) {
+                parts.push('<line x1="' + a[0].toFixed(1) + '" y1="' + a[1].toFixed(1) + '" x2="' + b[0].toFixed(1) + '" y2="' + b[1].toFixed(1) + '" stroke="#b7791f" stroke-width="3.5" stroke-linecap="round" pointer-events="none" />');
+                parts.push('<path d="M' + (mx + fd[0] * t).toFixed(1) + ' ' + (my + fd[1] * t).toFixed(1) +
+                  ' L' + (mx + n[0] * t * 0.7).toFixed(1) + ' ' + (my + n[1] * t * 0.7).toFixed(1) +
+                  ' L' + (mx - n[0] * t * 0.7).toFixed(1) + ' ' + (my - n[1] * t * 0.7).toFixed(1) +
+                  ' Z" fill="#b7791f" pointer-events="none" />');
+              }
+              // rotate handle: a grip past the (geometric, not necessarily "player") front-edge
+              // midpoint, SELECTED game only — drag it to set rotation_deg continuously (see
+              // wireFootprints' pointer handlers).
+              if (selected) {
+                var hx = mx + fd[0] * t * 3.2, hy = my + fd[1] * t * 3.2;
+                parts.push('<line x1="' + mx.toFixed(1) + '" y1="' + my.toFixed(1) + '" x2="' + hx.toFixed(1) + '" y2="' + hy.toFixed(1) + '" stroke="#0b63c4" stroke-width="1.5" stroke-dasharray="2 2" pointer-events="none" />');
+                parts.push('<circle class="rotgrip" data-fp="' + i + '" cx="' + hx.toFixed(1) + '" cy="' + hy.toFixed(1) + '" r="7" fill="#fff" stroke="#0b63c4" stroke-width="2.5" style="cursor:grab" />');
+              }
+              // dashed accent outline on the SELECTED footprint (3px visual margin, computed
+              // in feet so it survives toPx's scale rather than offsetting pixels directly)
+              if (selected) {
+                var selCorners = obbToCorners(M.inflateObb(obb, 3 / sc));
+                parts.push('<polygon points="' + cornersPts(selCorners) + '" fill="none" stroke="#0b63c4" stroke-width="2" stroke-dasharray="3 3" pointer-events="none" />');
+              }
+              // name label, centered on the OBB's true center
+              var cpx = v.toPx([obb.cx, obb.cy]);
+              parts.push('<text x="' + cpx[0].toFixed(1) + '" y="' + (cpx[1] + 3).toFixed(1) + '" text-anchor="middle" font-size="10" font-weight="700" paint-order="stroke" stroke="#fff" stroke-width="3" fill="' + stroke + '" pointer-events="none">' + escapeHtml(g.name) + '</text>');
+            });
+            // Advisory compliance overlays (doc 16) — each enabled layer draws on top and
+            // contributes findings. Purely additive: clears cleanly when toggled OFF.
+            var layerFindings = [];
+            ADVISORY_LAYERS.forEach(function (layer) {
+              if (!layerState[layer.id]) return;
+              var out = layer.render(v, sc);
+              if (out.svg) parts.push(out.svg);
+              out.findings.forEach(function (f) { layerFindings.push(f); });
+            });
+            v.svg.innerHTML = parts.join("");
+            renderGameList(room);
+            renderGameActions();
+            renderLayerOverlayUI(layerFindings);
+          }
+          // badge (non-dismissable while a layer is ON) + advisory findings list. Findings
+          // reuse Phase A's ⚠ warning flag styling; they highlight + list, never gate Next.
+          function renderLayerOverlayUI(findings) {
+            var enabled = ADVISORY_LAYERS.filter(function (l) { return layerState[l.id]; });
+            var badge = document.getElementById("layerBadge");
+            if (badge) {
+              if (enabled.length) {
+                badge.hidden = false;
+                badge.innerHTML = enabled.map(function (l) { return "⚠ " + l.badge; }).join("<br>");
+              } else { badge.hidden = true; badge.innerHTML = ""; }
+            }
+            var box = document.getElementById("layerFindings");
+            if (box) {
+              box.innerHTML = (findings || []).map(function (f) {
+                return '<div class="flag warning"><span class="ic">⚠</span><span class="fx"><strong>' +
+                  escapeHtml(f.message) + "</strong>" +
+                  (f.hint ? '<div class="hint">' + escapeHtml(f.hint) + "</div>" : "") + "</span></div>";
+              }).join("");
+            }
+          }
+          // contextual action bar for the SELECTED footprint (rotate / duplicate / delete).
+          function renderGameActions() {
+            var bar = document.getElementById("gameActions"); if (!bar) return;
+            if (!selValid()) { bar.hidden = true; bar.innerHTML = ""; return; }
+            var g = ui.placedGames[ui.selectedGame];
+            bar.hidden = false;
+            bar.innerHTML =
+              '<span class="ga-name">' + escapeHtml(g.name) + " · " + Math.round(g.rotation_deg || 0) + "°</span>" +
+              '<button type="button" data-act="cw" title="Rotate 90° (R; Shift+R reverses)">↻ Rotate 90°</button>' +
+              '<button type="button" data-act="dup" title="Duplicate (D)">Duplicate</button>' +
+              '<button type="button" class="danger" data-act="del" title="Delete (Del or Backspace)">Delete ✕</button>';
+            bar.querySelectorAll("[data-act]").forEach(function (b) {
+              b.onclick = function () { doAction(b.dataset.act); };
+            });
+          }
+          // apply an action to the selected game, then repaint + refresh flags/mirror.
+          function doAction(act) {
+            if (!selValid()) return;
+            var idx = ui.selectedGame, g = ui.placedGames[idx];
+            if (act === "cw") rotateGame(g, 90);
+            else if (act === "ccw") rotateGame(g, -90);
+            else if (act === "dup") {
+              var c = Object.assign({}, g);
+              c.x_ft = Math.round((g.x_ft + 1) * 10) / 10;
+              c.y_ft = Math.round((g.y_ft + 1) * 10) / 10;
+              ui.placedGames.push(c);
+              ui.selectedGame = ui.placedGames.length - 1;
+            } else if (act === "del") {
+              ui.placedGames.splice(idx, 1);
+              ui.selectedGame = null;
+            }
+            paint(); rerenderLive();
+          }
+          function renderGameList(room) {
+            var list = document.getElementById("gameList"); if (!list) return;
+            list.innerHTML = ui.placedGames.map(function (g, i) {
+              var bad = isBad(room, i);
+              return '<span class="pillarchip' + (bad ? " bad" : "") + (i === ui.selectedGame ? " sel" : "") +
+                '" data-sel="' + i + '">' + escapeHtml(g.name) + (bad ? " ⚠" : "") +
+                '<button type="button" data-rm="' + i + '">✕</button></span>';
+            }).join("");
+            list.querySelectorAll("[data-sel]").forEach(function (ch) {
+              ch.onclick = function () { ui.selectedGame = Number(ch.dataset.sel); paint(); };
+            });
+            list.querySelectorAll("[data-rm]").forEach(function (b) {
+              b.onclick = function (e) {
+                e.stopPropagation();
+                var i = Number(b.dataset.rm);
+                ui.placedGames.splice(i, 1);
+                if (ui.selectedGame === i) ui.selectedGame = null;
+                else if (ui.selectedGame != null && ui.selectedGame > i) ui.selectedGame--;
+                paint(); rerenderLive();
+              };
+            });
+          }
+          function dropAt(gid, clientX, clientY) {
+            var v = curView();
+            var ft = v.toFt(clientX, clientY); if (!ft) return;
+            var spec = GAME_CATALOG.find(function (g) { return g.id === gid; }); if (!spec) return;
+            ui.placedGames.push({
+              id: spec.id, name: spec.name, category: spec.category || "",
+              x_ft: Math.round(ft[0] * 10) / 10 - spec.w_ft / 2,
+              y_ft: Math.round(ft[1] * 10) / 10 - spec.d_ft / 2,
+              w_ft: spec.w_ft, d_ft: spec.d_ft, rotation_deg: 0,
+            });
+            ui.selectedGame = ui.placedGames.length - 1;   // select the just-placed game
+            pendingGame = null;
+            document.querySelectorAll(".palettile.armed").forEach(function (t) { t.classList.remove("armed"); });
+            paint(); rerenderLive();
+          }
+          // palette pickup — native HTML5 drag-drop + tap-to-arm touch fallback
+          document.querySelectorAll(".palettile").forEach(function (tile) {
+            tile.ondragstart = function (e) {
+              pendingGame = { gid: tile.dataset.gid };
+              if (e.dataTransfer) { try { e.dataTransfer.setData("text/plain", tile.dataset.gid); } catch (er) {} }
+            };
+            tile.onclick = function () {
+              var armed = tile.classList.contains("armed");
+              document.querySelectorAll(".palettile.armed").forEach(function (t) { t.classList.remove("armed"); });
+              if (armed) { pendingGame = null; }
+              else { pendingGame = { gid: tile.dataset.gid }; tile.classList.add("armed"); }
+            };
+          });
+          svg.ondragover = function (e) { e.preventDefault(); };
+          svg.ondrop = function (e) {
+            e.preventDefault();
+            var gid = pendingGame ? pendingGame.gid : (e.dataTransfer ? e.dataTransfer.getData("text/plain") : null);
+            if (gid) dropAt(gid, e.clientX, e.clientY);
+          };
+          // tap an armed tile then tap the floor to place; tapping empty floor deselects.
+          // The grab-handle angle, in the SAME convention as rotation_deg (frontDir's
+          // -sin/cos), for a point at floor-ft offset (dx,dy) from a game's center. Inverts
+          // frontDir(deg) = (-sin θ, cos θ): given a direction (dx,dy), θ = atan2(-dx, dy).
+          function angleToDeg(dx, dy) {
+            return (((Math.atan2(-dx, dy) * 180) / Math.PI) % 360 + 360) % 360;
+          }
+          // ── Phase 5 (doc 17): snap-to-wall on move-drag ──────────────────────────────
+          // Soft/overridable, with release hysteresis: a smaller radius to SNAP IN than to
+          // break OUT, so a flush placement doesn't jitter right at the threshold. Deferred:
+          // CORNER nestle (doc 17 lists it, but gives no concrete behavior to implement
+          // against — flagged rather than guessed) and the data-gated per-game exceptions.
+          var WALL_SNAP_IN_FT = 1.0;
+          var WALL_SNAP_OUT_FT = 1.8;
+          // Wall-snap candidate for a box centered at centerFt with half-depth halfDepthFt,
+          // against the nearest segment of `ring`. Rotation is set so the FRONT faces into
+          // the room — the inward wall normal, found via the same centroid-flip trick
+          // doorKeepout/adaDoors use to disambiguate which way a wall faces — converted to a
+          // rotation_deg via angleToDeg (the inverse of frontDir). Position is the nearest
+          // point on the wall, pushed inward by half the box's depth plus a small epsilon so
+          // it reads OK (not clipped) against the ±0.01 ft boundary tolerance already baked
+          // into pointInPolygon / obbInUsable. Returns null if `ring` is unusable.
+          function wallSnapCandidate(centerFt, halfDepthFt, ring) {
+            if (!ring || ring.length < 3) return null;
+            var near = nearestOnPoly(centerFt, ring);
+            if (!near) return null;
+            var dist = Math.hypot(centerFt[0] - near.point[0], centerFt[1] - near.point[1]);
+            var dx = near.b[0] - near.a[0], dy = near.b[1] - near.a[1], L = Math.hypot(dx, dy) || 1;
+            var n = [-dy / L, dx / L];
+            var c = polyCentroid(ring);
+            if (n[0] * (c[0] - near.point[0]) + n[1] * (c[1] - near.point[1]) < 0) n = [-n[0], -n[1]];
+            return {
+              dist: dist,
+              deg: angleToDeg(n[0], n[1]),
+              cx: near.point[0] + n[0] * (halfDepthFt + 0.02),
+              cy: near.point[1] + n[1] * (halfDepthFt + 0.02),
+            };
+          }
+          // ── Phase 5: game-edge abut + grid (lower priority than wall) ────────────────
+          // Pragmatic, not a full oriented support-function abut: snaps along whichever world
+          // axis (x or y) is dominant toward the nearest neighbor, keeping the dragged box's
+          // OWN rotation unchanged (unlike wall-snap, this never reorients the box). doc 17
+          // gives "GAME-EDGE abut to a neighbor's ring" as a single phrase with no further
+          // spec — this is a deliberately simple reading of it, good for the common case of
+          // lining games up in a row, not a guarantee of flush contact at arbitrary angles.
+          var EDGE_SNAP_IN_FT = 0.8;
+          var EDGE_SNAP_OUT_FT = 1.4;
+          var GRID_FT = 0.5;
+          var GRID_SNAP_FT = 0.15;
+          function gameEdgeSnapCandidate(centerFt, dragIdx) {
+            var best = null;
+            for (var j = 0; j < ui.placedGames.length; j++) {
+              if (j === dragIdx) continue;
+              var ring = obbToCorners(M.inflateObb(gameObb(ui.placedGames[j]), clearanceSpec()));
+              var near = nearestOnPoly(centerFt, ring);
+              if (!near) continue;
+              var dist = Math.hypot(centerFt[0] - near.point[0], centerFt[1] - near.point[1]);
+              if (!best || dist < best.dist) best = { dist: dist, point: near.point };
+            }
+            return best;
+          }
+          svg.onclick = function (evt) {
+            if (drag) return;
+            var cls = evt.target && evt.target.classList;
+            if (cls && (cls.contains("vtx") || cls.contains("rotgrip"))) return;
+            if (pendingGame) { dropAt(pendingGame.gid, evt.clientX, evt.clientY); return; }
+            if (ui.selectedGame != null) { ui.selectedGame = null; paint(); }
+          };
+          // select + reposition a placed footprint (grab-offset so it doesn't teleport), or
+          // drag the rotate handle (grab-offset on the ANGLE so rotation doesn't jump to
+          // wherever the cursor first lands relative to the handle's exact pixel).
+          svg.onpointerdown = function (evt) {
+            var t = evt.target;
+            if (t && t.classList && t.classList.contains("rotgrip")) {
+              var i = Number(t.dataset.fp);
+              var g = ui.placedGames[i]; if (!g) return;
+              var ft0 = curView().toFt(evt.clientX, evt.clientY); if (!ft0) return;
+              var obb0 = gameObb(g);
+              var grabDeg = angleToDeg(ft0[0] - obb0.cx, ft0[1] - obb0.cy);
+              drag = { kind: "rotate", idx: i, offsetDeg: ((g.rotation_deg || 0) - grabDeg + 360) % 360 };
+              try { svg.setPointerCapture(evt.pointerId); } catch (e) {}
+              evt.preventDefault();
+              return;
+            }
+            if (t && t.classList && t.classList.contains("vtx")) {
+              var v = curView();
+              var ft = v.toFt(evt.clientX, evt.clientY); if (!ft) return;
+              var i2 = Number(t.dataset.fp);
+              var g2 = ui.placedGames[i2]; if (!g2) return;
+              ui.selectedGame = i2;
+              // ring is cached once per drag gesture (the room doesn't change mid-drag) —
+              // avoids rebuilding it on every pointermove.
+              drag = { kind: "footprint", idx: i2, offset: [ft[0] - g2.x_ft, ft[1] - g2.y_ft], ring: M.pickUsable(buildRoom()), wallSnapped: false, edgeSnapped: false };
+              try { svg.setPointerCapture(evt.pointerId); } catch (e) {}
+              paint();
+              evt.preventDefault();
+            }
+          };
+          svg.onpointermove = function (evt) {
+            if (!drag) return;
+            if (drag.kind === "rotate") {
+              var g = ui.placedGames[drag.idx]; if (!g) return;
+              var ft = curView().toFt(evt.clientX, evt.clientY); if (!ft) return;
+              var obb = gameObb(g);
+              var dx = ft[0] - obb.cx, dy = ft[1] - obb.cy;
+              if (Math.hypot(dx, dy) < 0.15) return; // too close to center — angle is noisy
+              // Free spin, always — no detents while dragging. The only 90° increment is the
+              // R / Shift+R keyboard shortcut (doAction "cw"/"ccw"), unchanged below.
+              g.rotation_deg = (angleToDeg(dx, dy) + drag.offsetDeg + 360) % 360;
+              paint(); rerenderMirrorOnly();
+              return;
+            }
+            if (drag.kind !== "footprint") return;
+            var ft2 = curView().toFt(evt.clientX, evt.clientY); if (!ft2) return;
+            var gp = ui.placedGames[drag.idx]; if (!gp) return;
+            var rawX = ft2[0] - drag.offset[0], rawY = ft2[1] - drag.offset[1];
+            var rawCenter = [rawX + gp.w_ft / 2, rawY + gp.d_ft / 2];
+            var snap = wallSnapCandidate(rawCenter, gp.d_ft / 2, drag.ring);
+            var inRange = snap && snap.dist <= (drag.wallSnapped ? WALL_SNAP_OUT_FT : WALL_SNAP_IN_FT);
+            if (inRange) {
+              gp.rotation_deg = snap.deg;
+              // finer rounding than the raw 0.1ft drag so the flush epsilon survives intact
+              gp.x_ft = Math.round((snap.cx - gp.w_ft / 2) * 100) / 100;
+              gp.y_ft = Math.round((snap.cy - gp.d_ft / 2) * 100) / 100;
+              drag.wallSnapped = true;
+              drag.edgeSnapped = false;
+            } else {
+              drag.wallSnapped = false;
+              // priority: wall (above) > game-edge > grid > raw
+              var edge = gameEdgeSnapCandidate(rawCenter, drag.idx);
+              var edgeInRange = edge && edge.dist <= (drag.edgeSnapped ? EDGE_SNAP_OUT_FT : EDGE_SNAP_IN_FT);
+              if (edgeInRange) {
+                var aabb = M.obbAABB(gameObb(gp)); // current rotation's half-extents — edge-snap never reorients
+                var dx = rawCenter[0] - edge.point[0], dy = rawCenter[1] - edge.point[1];
+                var cx = rawCenter[0], cy = rawCenter[1];
+                if (Math.abs(dx) >= Math.abs(dy)) cx = edge.point[0] + (dx >= 0 ? 1 : -1) * (aabb.w / 2 + 0.02);
+                else cy = edge.point[1] + (dy >= 0 ? 1 : -1) * (aabb.d / 2 + 0.02);
+                gp.x_ft = Math.round((cx - gp.w_ft / 2) * 100) / 100;
+                gp.y_ft = Math.round((cy - gp.d_ft / 2) * 100) / 100;
+                drag.edgeSnapped = true;
+              } else {
+                drag.edgeSnapped = false;
+                // grid: a small magnetic radius around each 0.5ft intersection, lowest priority
+                var gx = Math.round(rawX / GRID_FT) * GRID_FT, gy = Math.round(rawY / GRID_FT) * GRID_FT;
+                if (Math.hypot(rawX - gx, rawY - gy) <= GRID_SNAP_FT) {
+                  gp.x_ft = gx; gp.y_ft = gy;
+                } else {
+                  gp.x_ft = Math.round(rawX * 10) / 10;
+                  gp.y_ft = Math.round(rawY * 10) / 10;
+                }
+              }
+            }
+            paint(); rerenderMirrorOnly();
+          };
+          svg.onpointerup = function (evt) {
+            if (drag && (drag.kind === "footprint" || drag.kind === "rotate")) {
+              drag = null;
+              try { svg.releasePointerCapture(evt.pointerId); } catch (e) {}
+              rerenderLive();
+            }
+          };
+          // Advisory-layer toggles (generic over the registry): flip enabled state + repaint.
+          // Never touches the Next gate — toggling a compliance layer can't block the user.
+          document.querySelectorAll("[data-layer]").forEach(function (cb) {
+            cb.checked = !!layerState[cb.dataset.layer];
+            cb.onchange = function () { layerState[cb.dataset.layer] = cb.checked; paint(); };
+          });
+          // keyboard: R rotate (Shift+R = CCW), D duplicate, Del/Backspace delete, Esc
+          // deselect — only on this step, only when a game is selected and focus isn't in the
+          // palette search. Re-bound each entry; replaced (not stacked) across re-renders.
+          if (fpKeyHandler) document.removeEventListener("keydown", fpKeyHandler);
+          fpKeyHandler = function (e) {
+            if (activeStepId() !== "placeGames") return;
+            var tag = ((e.target && e.target.tagName) || "").toLowerCase();
+            if (tag === "input" || tag === "textarea" || tag === "select") return;
+            if (e.key === "Escape") { if (ui.selectedGame != null) { ui.selectedGame = null; paint(); } return; }
+            if (!selValid()) return;
+            if (e.key === "r" || e.key === "R") { doAction(e.shiftKey ? "ccw" : "cw"); e.preventDefault(); }
+            else if (e.key === "d" || e.key === "D") { doAction("dup"); e.preventDefault(); }
+            else if (e.key === "Delete" || e.key === "Backspace") { doAction("del"); e.preventDefault(); }
+          };
+          document.addEventListener("keydown", fpKeyHandler);
+          paint();
         }
 
         // ── review painter ───────────────────────────────────────────────────────────
