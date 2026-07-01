@@ -22,12 +22,24 @@
   if (typeof module !== "undefined" && module.exports) {
     module.exports = api;
     if (require.main === module) {
-      // CLI: read a JSON array of RoomInput dicts on stdin, print a JSON array of
-      // projected UsableResults on stdout. Used only by the parity test.
-      const fs = require("fs");
-      const rooms = JSON.parse(fs.readFileSync(0, "utf8"));
-      const out = rooms.map((r) => api.buildUsable(r));
-      process.stdout.write(JSON.stringify(out));
+      if (process.argv[2] === "obb") {
+        // OBB geometry subcommand (doc 17, Phase C — purely additive / dormant). Reads a
+        // JSON array of {op,...} cases on stdin, dispatches each to the new OBB helpers, and
+        // prints a JSON array to stdout. Exercised ONLY by tests/test_obb_geometry_js.py.
+        // stdin drains once, so this branch reads its OWN payload; the no-arg branch below is
+        // the EXISTING buildUsable behaviour, byte-for-byte unchanged (parity lock).
+        const fs = require("fs");
+        const cases = JSON.parse(fs.readFileSync(0, "utf8"));
+        const out = cases.map((c) => api.obbDispatch(c));
+        process.stdout.write(JSON.stringify(out));
+      } else {
+        // CLI: read a JSON array of RoomInput dicts on stdin, print a JSON array of
+        // projected UsableResults on stdout. Used only by the parity test.
+        const fs = require("fs");
+        const rooms = JSON.parse(fs.readFileSync(0, "utf8"));
+        const out = rooms.map((r) => api.buildUsable(r));
+        process.stdout.write(JSON.stringify(out));
+      }
     }
   } else {
     root.BetsonMeasure = api;
@@ -51,6 +63,10 @@
   const MAX_DOOR_WIDTH_IN = 144.0;
   const MIN_CEILING_FT = 7.0;
   const MAX_CEILING_FT = 40.0;
+  // Phase A (browser-only game placement): uniform clearance ring around each placed
+  // game footprint, matching the Python decoder's ew/eh per-side expansion. Purely
+  // additive — NOT read by usableAreaSqft/validate/buildUsable/gradeConfidence.
+  const CLEARANCE_FT = 2.5;
 
   // The customer-facing measuring guide (Mike approved a website FAQ).
   const HOW_TO_MEASURE_URL = "https://www.betson.com/how-to-measure-your-room";
@@ -471,6 +487,446 @@
     };
   }
 
+  // ── Phase A geometry helpers (browser-only placement/clearance; purely additive) ──
+  // None of these are called from buildUsable/validate/usableAreaSqft/gradeConfidence,
+  // so usable_sqft/game_count/codes/grade stay byte-identical (parity guard).
+
+  // The usable region a placed game must sit inside — mirrors usableAreaSqft precedence
+  // (L130-139): usable_polygon_ft (>=3) wins, else polygon_ft (>=3), else the w×d rect.
+  function pickUsable(room) {
+    if (room.usable_polygon_ft && room.usable_polygon_ft.length >= 3) return room.usable_polygon_ft;
+    if (room.polygon_ft && room.polygon_ft.length >= 3) return room.polygon_ft;
+    if (room.width_ft && room.depth_ft && room.width_ft > 0 && room.depth_ft > 0)
+      return [
+        [0.0, 0.0],
+        [room.width_ft, 0.0],
+        [room.width_ft, room.depth_ft],
+        [0.0, room.depth_ft],
+      ];
+    return null;
+  }
+  // Classic ray-cast point-in-polygon (NEW: no point-in-polygon existed in this file).
+  function pointInPolygon(pt, ring) {
+    if (!ring || ring.length < 3) return false;
+    const x = pt[0];
+    const y = pt[1];
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const xi = ring[i][0];
+      const yi = ring[i][1];
+      const xj = ring[j][0];
+      const yj = ring[j][1];
+      const intersect =
+        yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi;
+      if (intersect) inside = !inside;
+    }
+    return inside;
+  }
+  // AABB overlap on top-left rects {x,y,w,d}, with the established ±0.01 ft tolerance (L124).
+  function rectsOverlap(a, b) {
+    return (
+      a.x < b.x + b.w + 0.01 &&
+      b.x < a.x + a.w + 0.01 &&
+      a.y < b.y + b.d + 0.01 &&
+      b.y < a.y + a.d + 0.01
+    );
+  }
+  // Inflate a top-left rect uniformly by `pad` per side (matches Python ew/eh ring).
+  function inflateRect(r, pad) {
+    return { x: r.x - pad, y: r.y - pad, w: r.w + 2 * pad, d: r.d + 2 * pad };
+  }
+  // True iff all 4 corners of a top-left rect fall inside the room's usable region.
+  function rectInUsable(room, r) {
+    const ring = pickUsable(room);
+    if (!ring) return false;
+    const corners = [
+      [r.x, r.y],
+      [r.x + r.w, r.y],
+      [r.x + r.w, r.y + r.d],
+      [r.x, r.y + r.d],
+    ];
+    return corners.every((c) => pointInPolygon(c, ring));
+  }
+
+  // ── Phase B geometry helpers (advisory ADA / egress overlay; purely additive) ─────
+  // Exactly like the Phase A block above: NONE of these are called from buildUsable /
+  // validate / usableAreaSqft / gradeConfidence, so usable_sqft / game_count / codes /
+  // grade stay byte-identical and tests/test_measure_js_parity.py stays green.
+
+  // Minimum clear distance (ft) between two top-left AABB rects {x,y,w,d}. 0 when they
+  // touch or overlap. Used to find sub-36" aisle pinches between placed game footprints.
+  function rectGap(a, b) {
+    const dx = Math.max(0, a.x - (b.x + b.w), b.x - (a.x + a.w));
+    const dy = Math.max(0, a.y - (b.y + b.d), b.y - (a.y + a.d));
+    return Math.hypot(dx, dy);
+  }
+
+  // Distance from point p=[x,y] to segment a→b (a,b are [x,y]). NEW (no such fn existed).
+  function pointToSegmentDist(p, a, b) {
+    const dx = b[0] - a[0];
+    const dy = b[1] - a[1];
+    const l2 = dx * dx + dy * dy;
+    if (l2 === 0) return Math.hypot(p[0] - a[0], p[1] - a[1]);
+    let t = ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(p[0] - (a[0] + t * dx), p[1] - (a[1] + t * dy));
+  }
+
+  // The egress keep-out quad in front of a door: a (widthFt × depthFt) rectangle that
+  // begins at the door opening and projects INTO the room. `a`/`b` are the door's wall
+  // segment endpoints; `inwardRef` is any point inside the room (e.g. the centroid), used
+  // to orient the projection toward the interior. Returns a 4-point [x,y] ring.
+  function doorKeepout(doorPos, a, b, inwardRef, widthFt, depthFt) {
+    const dx = b[0] - a[0];
+    const dy = b[1] - a[1];
+    const L = Math.hypot(dx, dy) || 1;
+    const wu = [dx / L, dy / L]; // along-wall unit (tangent)
+    let n = [-wu[1], wu[0]]; // wall normal
+    if (n[0] * (inwardRef[0] - doorPos[0]) + n[1] * (inwardRef[1] - doorPos[1]) < 0) n = [-n[0], -n[1]];
+    const half = widthFt / 2;
+    const base0 = [doorPos[0] - wu[0] * half, doorPos[1] - wu[1] * half];
+    const base1 = [doorPos[0] + wu[0] * half, doorPos[1] + wu[1] * half];
+    const far1 = [base1[0] + n[0] * depthFt, base1[1] + n[1] * depthFt];
+    const far0 = [base0[0] + n[0] * depthFt, base0[1] + n[1] * depthFt];
+    return [base0, base1, far1, far0];
+  }
+
+  // Do segments p1→p2 and p3→p4 properly cross? (internal helper for rectIntersectsPoly)
+  function _segCross(p1, p2, p3, p4) {
+    const ccw = (A, B, C) => (C[1] - A[1]) * (B[0] - A[0]) > (B[1] - A[1]) * (C[0] - A[0]);
+    return ccw(p1, p3, p4) !== ccw(p2, p3, p4) && ccw(p1, p2, p3) !== ccw(p1, p2, p4);
+  }
+
+  // Does an axis-aligned top-left rect {x,y,w,d} overlap a simple polygon ring [[x,y],…]?
+  // True when any rect corner is in the polygon, any polygon vertex is in the rect, or any
+  // edges cross — enough to flag a footprint (or its clearance ring) intruding a keep-out.
+  function rectIntersectsPoly(r, ring) {
+    if (!ring || ring.length < 3) return false;
+    const corners = [
+      [r.x, r.y],
+      [r.x + r.w, r.y],
+      [r.x + r.w, r.y + r.d],
+      [r.x, r.y + r.d],
+    ];
+    for (let i = 0; i < 4; i++) if (pointInPolygon(corners[i], ring)) return true;
+    const inRect = (p) => p[0] >= r.x && p[0] <= r.x + r.w && p[1] >= r.y && p[1] <= r.y + r.d;
+    for (let k = 0; k < ring.length; k++) if (inRect(ring[k])) return true;
+    for (let e = 0; e < 4; e++) {
+      const c0 = corners[e];
+      const c1 = corners[(e + 1) % 4];
+      for (let m = 0; m < ring.length; m++) {
+        if (_segCross(c0, c1, ring[m], ring[(m + 1) % ring.length])) return true;
+      }
+    }
+    return false;
+  }
+
+  // Phase C (OBB free-rotation; purely additive) ───────────────────────────────────
+  // Oriented-bounding-box geometry for the browser placement tool. DORMANT in Phase 1:
+  // exactly like the Phase A/B blocks above, NONE of these is called from buildUsable /
+  // validate / usableAreaSqft / gradeConfidence / polygonArea / roomArea / gameCount /
+  // normalizeRoom / buildCaveats / confidenceReasons, so usable_sqft / game_count / codes /
+  // grade stay byte-identical and tests/test_measure_js_parity.py stays green. Built over the
+  // existing angle-agnostic primitives (pointInPolygon, _segCross, pointToSegmentDist) and
+  // mirroring the rect* helpers + the single ±0.01 ft tolerance convention (rectsOverlap
+  // L516-519, pillar bbox L128) so that at θ∈{0,90,180,270} every OBB result reduces to
+  // today's AABB result. OBB shape: { cx, cy, w, d, deg } — center, width (local x), depth
+  // (local y), degrees CCW. At θ=0 the corner winding equals the rect {x:cx-w/2, y:cy-d/2,
+  // w, d} corners used by rectInUsable / rectIntersectsPoly, which makes the reduction exact.
+
+  // Top-left AABB rect for an OBB at θ=0 (the rect an axis-aligned box corresponds to).
+  function toRect(obb) {
+    return { x: obb.cx - obb.w / 2, y: obb.cy - obb.d / 2, w: obb.w, d: obb.d };
+  }
+  // The 4 corners of an OBB, CCW from the (−w/2,−d/2) local corner. At θ=0 these equal the
+  // rect corners [(x,y),(x+w,y),(x+w,y+d),(x,y+d)] in the SAME order rectInUsable uses.
+  function obbCorners(cx, cy, w, h, thetaDeg) {
+    const t = ((thetaDeg || 0) * Math.PI) / 180;
+    const cos = Math.cos(t);
+    const sin = Math.sin(t);
+    const hw = w / 2;
+    const hh = h / 2;
+    const local = [
+      [-hw, -hh],
+      [hw, -hh],
+      [hw, hh],
+      [-hw, hh],
+    ];
+    return local.map(([dx, dy]) => [cx + dx * cos - dy * sin, cy + dx * sin + dy * cos]);
+  }
+  // The i-th OBB face normal (unit): axis 0 = local +x (cos,sin), axis 1 = local +y (−sin,cos).
+  // SAT needs only these two per box (opposite faces share a normal). At θ=0: (1,0) and (0,1).
+  function _obbAxis(obb, i) {
+    const t = ((obb.deg || 0) * Math.PI) / 180;
+    const cos = Math.cos(t);
+    const sin = Math.sin(t);
+    return i === 0 ? [cos, sin] : [-sin, cos];
+  }
+  // [min,max] of the projection of `corners` onto unit axis `ax`.
+  function _projExtent(corners, ax) {
+    let mn = Infinity;
+    let mx = -Infinity;
+    for (let i = 0; i < corners.length; i++) {
+      const d = corners[i][0] * ax[0] + corners[i][1] * ax[1];
+      if (d < mn) mn = d;
+      if (d > mx) mx = d;
+    }
+    return [mn, mx];
+  }
+  // Enclosing axis-aligned top-left rect {x,y,w,d} of an OBB's 4 corners. At θ=0 this equals
+  // toRect(obb); with inflateObb it is the broad-phase superset obbAABB(inflateObb(...)).
+  function obbAABB(obb) {
+    const cs = obbCorners(obb.cx, obb.cy, obb.w, obb.d, obb.deg || 0);
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (let i = 0; i < cs.length; i++) {
+      const x = cs[i][0];
+      const y = cs[i][1];
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+    return { x: minX, y: minY, w: maxX - minX, d: maxY - minY };
+  }
+  // Is point p=[x,y] inside the OBB? Inverse-rotate into the box's local frame and compare to
+  // the half-extents with the established ±0.01 ft tolerance (a point within 0.01 ft of a wall
+  // reads as inside — flush-to-wall must not self-flag, matching rectsOverlap / the pillar bbox).
+  function pointInObb(p, obb) {
+    const t = ((obb.deg || 0) * Math.PI) / 180;
+    const cos = Math.cos(t);
+    const sin = Math.sin(t);
+    const dx = p[0] - obb.cx;
+    const dy = p[1] - obb.cy;
+    const lx = dx * cos + dy * sin; // inverse rotation (rotate by −θ)
+    const ly = -dx * sin + dy * cos;
+    // Strict `<` so the seam matches the overlap convention exactly: within 0.01 ft of a face
+    // is inside (flush-to-wall reads OK), at/ beyond 0.01 ft is outside (gap ≥ 0.01 ⇒ clear).
+    return Math.abs(lx) < obb.w / 2 + 0.01 && Math.abs(ly) < obb.d / 2 + 0.01;
+  }
+  // Strict-interior variant of pointInObb for the Part-3 intrusion test: a point counts only when
+  // it is ≥0.01 ft INSIDE every face (inset by the same seam, NOT the outward +0.01 ft tolerance).
+  // This is what lets obbInUsable reduce to the legacy AABB accept for a box flush in a CONVEX
+  // corner — a room vertex on/just outside the box boundary is not an intrusion — while a
+  // reflex/concave vertex poking genuinely inside still trips Part 3 (box-E).
+  function pointStrictlyInObb(p, obb) {
+    const t = ((obb.deg || 0) * Math.PI) / 180;
+    const cos = Math.cos(t);
+    const sin = Math.sin(t);
+    const dx = p[0] - obb.cx;
+    const dy = p[1] - obb.cy;
+    const lx = dx * cos + dy * sin; // inverse rotation (rotate by −θ), same as pointInObb
+    const ly = -dx * sin + dy * cos;
+    return Math.abs(lx) < obb.w / 2 - 0.01 && Math.abs(ly) < obb.d / 2 - 0.01;
+  }
+  // Proper (transversal) segment crossing for Part 2 of obbInUsable: true ONLY when ab and cd
+  // cross through each other's interior. Unlike the shared _segCross it returns FALSE for a
+  // collinear-overlap or endpoint touch, so a box edge lying flush ALONG a wall is not a
+  // "crossing" (flush-to-wall must reduce to the legacy AABB accept) while a box edge that
+  // genuinely passes through a wall still trips (box-E, the slot bridge).
+  function _properCross(a, b, c, d) {
+    const o = (p, q, r) => (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]);
+    return o(a, b, c) * o(a, b, d) < 0 && o(c, d, a) * o(c, d, b) < 0;
+  }
+  // 3-PART containment: an OBB is inside the usable polygon iff (1) all 4 corners are in the
+  // polygon AND (2) no box edge crosses any wall/ring segment AND (3) no ring vertex sits
+  // inside the box. The legacy corner-only rectInUsable (L527-537) silently passes a box that
+  // pokes through a concave/angled wall; parts 2-3 are what catch it (box-E in the test).
+  function obbInUsable(obb, usablePolygon) {
+    const ring = usablePolygon;
+    if (!ring || ring.length < 3) return false;
+    const corners = obbCorners(obb.cx, obb.cy, obb.w, obb.d, obb.deg || 0);
+    // Part 1 — every corner inside the polygon.
+    for (let i = 0; i < 4; i++) if (!pointInPolygon(corners[i], ring)) return false;
+    // Part 2 — no box edge TRANSVERSALLY crosses a wall segment. Uses _properCross (not the shared
+    // _segCross) so a box edge lying flush ALONG a wall is not a crossing — flush-to-wall reduces to
+    // the legacy AABB accept — while a genuine poke through an (angled/concave) wall still rejects.
+    for (let e = 0; e < 4; e++) {
+      const c0 = corners[e];
+      const c1 = corners[(e + 1) % 4];
+      for (let m = 0; m < ring.length; m++) {
+        if (_properCross(c0, c1, ring[m], ring[(m + 1) % ring.length])) return false;
+      }
+    }
+    // Part 3 — no wall vertex STRICTLY inside the box. Uses the inset pointStrictlyInObb (not the
+    // outward +0.01 seam of pointInObb): a CONVEX wall vertex flush against the box boundary is not
+    // an intrusion (must reduce to the legacy AABB accept), while a reflex/concave vertex poking
+    // ≥0.01 ft in still rejects (box-E). [regression: flush-to-convex-corner, adversarial verify]
+    for (let k = 0; k < ring.length; k++) if (pointStrictlyInObb(ring[k], obb)) return false;
+    return true;
+  }
+  // SAT overlap of two OBBs over the 4 face normals, in the INTERVAL/OFFSET form of
+  // rectsOverlap (L514-521) so that at θ=0 it is byte-identical to rectsOverlap for every
+  // placement INCLUDING the ±0.01 ft seam: each axis test collapses to `aMin < bMax + 0.01`.
+  function obbOverlap(a, b) {
+    const ca = obbCorners(a.cx, a.cy, a.w, a.d, a.deg || 0);
+    const cb = obbCorners(b.cx, b.cy, b.w, b.d, b.deg || 0);
+    const axes = [_obbAxis(a, 0), _obbAxis(a, 1), _obbAxis(b, 0), _obbAxis(b, 1)];
+    for (let i = 0; i < axes.length; i++) {
+      const ea = _projExtent(ca, axes[i]);
+      const eb = _projExtent(cb, axes[i]);
+      // separated on this axis ⇒ no overlap (mirrors rectsOverlap's offset comparison)
+      if (!(ea[0] < eb[1] + 0.01 && eb[0] < ea[1] + 0.01)) return false;
+    }
+    return true;
+  }
+  // Minimum clear distance (ft) between two OBBs; 0 when they overlap. For disjoint convex
+  // quads the min distance is vertex↔edge, so scan every corner of each against the other's
+  // edges (the rotated analogue of rectGap).
+  function obbGap(a, b) {
+    if (obbOverlap(a, b)) return 0;
+    const ca = obbCorners(a.cx, a.cy, a.w, a.d, a.deg || 0);
+    const cb = obbCorners(b.cx, b.cy, b.w, b.d, b.deg || 0);
+    let best = Infinity;
+    for (let i = 0; i < 4; i++) {
+      for (let j = 0; j < 4; j++) {
+        const da = pointToSegmentDist(ca[i], cb[j], cb[(j + 1) % 4]);
+        if (da < best) best = da;
+        const db = pointToSegmentDist(cb[i], ca[j], ca[(j + 1) % 4]);
+        if (db < best) best = db;
+      }
+    }
+    return best;
+  }
+  // Advisory pinch: the two footprints are clear (not overlapping) but their gap is below the
+  // required clearance — a sub-aisle pinch. Uses the same ±0.01 ft seam as the overlap test.
+  function obbPinch(a, b, minClearFt) {
+    const thr = minClearFt === null || minClearFt === undefined ? CLEARANCE_FT : minClearFt;
+    if (obbOverlap(a, b)) return false;
+    return obbGap(a, b) < thr + 0.01;
+  }
+  // Inflate an OBB by a clearance ring. Accepts a uniform number (every side) OR a per-side
+  // {front,back,left,right} object (front/back grow local +y/−y, right/left grow local +x/−x);
+  // asymmetric growth shifts the center accordingly. A number — or missing sides — falls back
+  // to uniform, so with no per-side data this is byte-identical to today's flat ring (inflateRect).
+  function inflateObb(obb, spec) {
+    let front;
+    let back;
+    let left;
+    let right;
+    if (spec !== null && typeof spec === "object") {
+      const u = spec.uniform === null || spec.uniform === undefined ? 0 : spec.uniform;
+      front = spec.front === null || spec.front === undefined ? u : spec.front;
+      back = spec.back === null || spec.back === undefined ? u : spec.back;
+      left = spec.left === null || spec.left === undefined ? u : spec.left;
+      right = spec.right === null || spec.right === undefined ? u : spec.right;
+    } else {
+      const p = Number(spec) || 0;
+      front = back = left = right = p;
+    }
+    const w2 = obb.w + left + right;
+    const d2 = obb.d + front + back;
+    const sx = (right - left) / 2; // center shift along local +x
+    const sy = (front - back) / 2; // center shift along local +y
+    const t = ((obb.deg || 0) * Math.PI) / 180;
+    const cos = Math.cos(t);
+    const sin = Math.sin(t);
+    return {
+      cx: obb.cx + sx * cos - sy * sin,
+      cy: obb.cy + sx * sin + sy * cos,
+      w: w2,
+      d: d2,
+      deg: obb.deg || 0,
+    };
+  }
+  // OBB vs polygon-ring overlap (the OBB analogue of rectIntersectsPoly L591-610): true when
+  // any OBB corner is in the ring, any ring vertex is in the OBB, or any edges cross.
+  function obbIntersectsPoly(obb, poly) {
+    const ring = poly;
+    if (!ring || ring.length < 3) return false;
+    const corners = obbCorners(obb.cx, obb.cy, obb.w, obb.d, obb.deg || 0);
+    for (let i = 0; i < 4; i++) if (pointInPolygon(corners[i], ring)) return true;
+    for (let k = 0; k < ring.length; k++) if (pointInObb(ring[k], obb)) return true;
+    for (let e = 0; e < 4; e++) {
+      const c0 = corners[e];
+      const c1 = corners[(e + 1) % 4];
+      for (let m = 0; m < ring.length; m++) {
+        if (_segCross(c0, c1, ring[m], ring[(m + 1) % ring.length])) return true;
+      }
+    }
+    return false;
+  }
+  // Test-only dispatcher for the `obb` argv subcommand (parity-safe — never called by the
+  // locked engine). Maps a {op,...} case from tests/test_obb_geometry_js.py to the helper(s)
+  // above and returns a JSON-able result. Combined ops bundle the comparisons a single test
+  // assertion needs (e.g. obbOverlap vs rectsOverlap, two-phase vs single-phase SAT).
+  function obbDispatch(c) {
+    switch (c && c.op) {
+      case "corners":
+        return obbCorners(c.cx, c.cy, c.w, c.d, c.deg || 0);
+      case "aabb":
+        return obbAABB(c.obb);
+      case "pointInObb":
+        return pointInObb(c.p, c.obb);
+      case "inUsable": {
+        const obb = c.obb;
+        const ring = c.ring;
+        const corners = obbCorners(obb.cx, obb.cy, obb.w, obb.d, obb.deg || 0);
+        const cornersIn = corners.every((pt) => pointInPolygon(pt, ring));
+        let edgeCross = false;
+        for (let e = 0; e < 4 && !edgeCross; e++) {
+          const c0 = corners[e];
+          const c1 = corners[(e + 1) % 4];
+          for (let m = 0; m < ring.length; m++) {
+            if (_properCross(c0, c1, ring[m], ring[(m + 1) % ring.length])) {
+              edgeCross = true;
+              break;
+            }
+          }
+        }
+        let vertexIn = false;
+        for (let k = 0; k < ring.length; k++) {
+          if (pointStrictlyInObb(ring[k], obb)) {
+            vertexIn = true;
+            break;
+          }
+        }
+        return {
+          inUsable: obbInUsable(obb, ring),
+          cornersIn: cornersIn,
+          noEdgeCross: !edgeCross,
+          noVertexInBox: !vertexIn,
+          rectInUsable: rectInUsable({ usable_polygon_ft: ring }, toRect(obb)),
+        };
+      }
+      case "overlap":
+        return obbOverlap(c.a, c.b);
+      case "overlapPair":
+        return { obb: obbOverlap(c.a, c.b), rect: rectsOverlap(toRect(c.a), toRect(c.b)) };
+      case "twoPhase": {
+        const ai = inflateObb(c.a, c.clr);
+        const bi = inflateObb(c.b, c.clr);
+        return {
+          single: obbOverlap(ai, bi),
+          broad: rectsOverlap(obbAABB(ai), obbAABB(bi)),
+          oldBroad: rectsOverlap(inflateRect(toRect(c.a), c.clr), inflateRect(toRect(c.b), c.clr)),
+          singleRaw: obbOverlap(c.a, c.b),
+          oldRawBroad: rectsOverlap(toRect(c.a), toRect(c.b)),
+        };
+      }
+      case "gap":
+        return obbGap(c.a, c.b);
+      case "pinch":
+        return obbPinch(c.a, c.b, c.minClear);
+      case "inflate":
+        return inflateObb(c.obb, c.spec);
+      case "inflateAABB": {
+        const inf = inflateObb(c.obb, c.clr);
+        return {
+          infObb: inf,
+          obbAabb: obbAABB(inf),
+          rectInflate: inflateRect(toRect(c.obb), c.clr),
+        };
+      }
+      case "intersectsPoly":
+        return obbIntersectsPoly(c.obb, c.ring);
+      default:
+        return { error: "unknown op: " + String(c && c.op) };
+    }
+  }
+
   return {
     SQ_FT_PER_GAME,
     DEFAULT_DOOR_WIDTH_IN,
@@ -489,5 +945,29 @@
     confidenceReasons,
     gradeConfidence,
     buildUsable,
+    // Phase A (browser-only placement) — additive, never called by the above.
+    CLEARANCE_FT,
+    pointInPolygon,
+    rectInUsable,
+    rectsOverlap,
+    inflateRect,
+    pickUsable,
+    // Phase B (advisory ADA / egress overlay) — additive, never called by the above.
+    rectGap,
+    pointToSegmentDist,
+    doorKeepout,
+    rectIntersectsPoly,
+    // Phase C (OBB free-rotation) — additive, never called by the locked engine above.
+    obbCorners,
+    obbAABB,
+    toRect,
+    pointInObb,
+    obbInUsable,
+    obbOverlap,
+    obbGap,
+    obbPinch,
+    inflateObb,
+    obbIntersectsPoly,
+    obbDispatch,
   };
 });
